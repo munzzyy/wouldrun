@@ -1,0 +1,13 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'src/**'
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "build the docs site"
