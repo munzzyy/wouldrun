@@ -133,5 +133,27 @@ class Errors(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
+class MalformedWorkflowGlob(unittest.TestCase):
+    def test_bad_char_range_degrades_gracefully_other_workflows_still_resolve(self):
+        # `[z-a]` is a reversed character-class range: an invalid regex once
+        # translated. SECURITY.md calls a workflow that crashes the whole
+        # evaluator a vulnerability, not an ordinary bug, so this must not
+        # take down workflows that have nothing to do with the bad one.
+        root = make_repo(
+            {
+                ".github/workflows/broken.yml": (
+                    "on:\n  push:\n    branches: ['[z-a]']\njobs:\n  b:\n    runs-on: u\n"
+                ),
+                ".github/workflows/ok.yml": "on: push\njobs:\n  b:\n    runs-on: u\n",
+            }
+        )
+        code, out, err = _run([str(root), "--event", "push", "--ref", "refs/heads/main", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        self.assertNotIn("Traceback", out)
+        self.assertIn("FIRES", out)
+        self.assertIn("SKIPPED", out)
+
+
 if __name__ == "__main__":
     unittest.main()

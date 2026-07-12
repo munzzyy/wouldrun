@@ -362,5 +362,32 @@ class UnknownEventPassesThrough(unittest.TestCase):
         self.assertTrue(r.fires)
 
 
+class MalformedGlobDoesNotCrashEvaluation(unittest.TestCase):
+    """A workflow with an invalid filter pattern (e.g. a reversed character
+    range) must degrade to a SKIPPED verdict with a reason, not blow up
+    evaluate_all -- wouldrun's own SECURITY.md calls a workflow that crashes
+    the evaluator a vulnerability."""
+
+    BAD_TEXT = "on:\n  push:\n    branches: ['[z-a]']\njobs:\n  b:\n    runs-on: u\n"
+
+    def test_single_malformed_workflow_reports_a_reason_not_a_crash(self):
+        r = _run(self.BAD_TEXT, Event(name="push", ref="refs/heads/main"))
+        self.assertFalse(r.fires)
+        self.assertTrue(any("[z-a]" in reason for reason in r.reasons))
+
+    def test_other_workflows_still_evaluate(self):
+        root = make_repo(
+            {
+                ".github/workflows/broken.yml": self.BAD_TEXT,
+                ".github/workflows/ok.yml": "on: push\njobs:\n  b:\n    runs-on: u\n",
+            }
+        )
+        workflows = discover(str(root))
+        results = evaluate_all(workflows, Event(name="push", ref="refs/heads/main"))
+        by_path = {r.workflow.path: r for r in results}
+        self.assertFalse(by_path[".github/workflows/broken.yml"].fires)
+        self.assertTrue(by_path[".github/workflows/ok.yml"].fires)
+
+
 if __name__ == "__main__":
     unittest.main()

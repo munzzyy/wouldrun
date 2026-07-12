@@ -75,7 +75,18 @@ def _evaluate_direct(workflow, event: Event) -> WorkflowResult:
         )
 
     spec = workflow.triggers[event.name]
-    fires, reasons = _evaluate_trigger(event.name, spec, event)
+    try:
+        fires, reasons = _evaluate_trigger(event.name, spec, event)
+    except globmatch.GlobError as e:
+        # A malformed filter pattern (e.g. a reversed character-class range
+        # like `[z-a]`) is bad input in one workflow's YAML, not a reason to
+        # take down evaluation for every other workflow in the repo -- see
+        # SECURITY.md on crashing the evaluator.
+        return WorkflowResult(
+            workflow=workflow,
+            fires=False,
+            reasons=[f"could not evaluate this workflow's filter patterns: {e}"],
+        )
     jobs = sorted(workflow.jobs) if fires else []
     return WorkflowResult(workflow=workflow, fires=fires, reasons=reasons, jobs=jobs)
 
