@@ -159,6 +159,37 @@ class Malformed(unittest.TestCase):
         with self.assertRaises(YamlError):
             load(12345)  # type: ignore[arg-type]
 
+    def test_deeply_nested_mapping_is_a_yaml_error_not_a_recursion_error(self):
+        # 1200 levels of one-space-deeper nesting is ~700KB, well under
+        # MAX_BYTES/MAX_LINES, but the old mutually-recursive parser blew
+        # Python's call stack on input this shape. This must degrade to a
+        # clean YamlError like every other malformed-input case, not a
+        # bare RecursionError/traceback.
+        nested = "".join(f"{' ' * i}a:\n" for i in range(1200))
+        with self.assertRaises(YamlError):
+            load(nested)
+
+    def test_moderately_nested_mapping_still_parses(self):
+        # The depth cap must have real headroom above anything a real
+        # workflow file would ever do -- this is far deeper than any
+        # GitHub Actions workflow's `on:`/`jobs:` tree.
+        levels = 50
+        nested = "".join(f"{'  ' * i}a:\n" for i in range(levels - 1)) + ("  " * (levels - 1)) + "a: 1\n"
+        doc = load(nested)
+        for _ in range(levels - 1):
+            doc = doc["a"]
+        self.assertEqual(doc["a"], 1)
+
+    def test_many_sibling_keys_is_not_mistaken_for_deep_nesting(self):
+        # Width, not depth: 2000 one-level-nested sibling keys means 2000
+        # separate, shallow recursions into parse_block, one per key. Each
+        # must fully unwind before the next sibling starts, so this must
+        # not trip a depth guard meant only for actual nesting.
+        text = "".join(f"key{i}:\n  a: {i}\n" for i in range(2000))
+        doc = load(text)
+        self.assertEqual(len(doc), 2000)
+        self.assertEqual(doc["key1999"]["a"], 1999)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,6 +32,7 @@ import re
 
 MAX_BYTES = 2 * 1024 * 1024
 MAX_LINES = 20000
+MAX_DEPTH = 200  # nesting levels; real workflow files never get close
 
 _BLOCK_SCALAR_RE = re.compile(r"^[|>][+-]?\d*$")
 _INT_RE = re.compile(r"^[-+]?[0-9]+$")
@@ -60,6 +61,7 @@ class _Parser:
     def __init__(self, lines):
         self.lines = lines
         self.n = len(lines)
+        self._depth = 0
         self._trim_document_markers()
 
     def _trim_document_markers(self):
@@ -105,16 +107,28 @@ class _Parser:
     # -- block parsing ------------------------------------------------------
 
     def parse_block(self, idx, min_indent):
-        i = self._next_real(idx)
-        if i is None:
-            return None, idx
-        indent = self._indent_of(self.lines[i])
-        if indent < min_indent:
-            return None, idx
-        content = self._content(i)
-        if content == "-" or content.startswith("- "):
-            return self._parse_sequence(i, indent)
-        return self._parse_mapping(i, indent)
+        # Every recursive descent -- from _parse_mapping, _parse_sequence,
+        # and _parse_mapping_continuation alike -- funnels back through this
+        # one method, so it is the single place to cap how deep the mutual
+        # recursion is allowed to go. Sibling keys/items at the same level
+        # call back in sequentially, not simultaneously, so the try/finally
+        # unwind keeps their depth from stacking; only genuine nesting does.
+        self._depth += 1
+        try:
+            if self._depth > MAX_DEPTH:
+                raise YamlError(f"nesting exceeds {MAX_DEPTH} levels")
+            i = self._next_real(idx)
+            if i is None:
+                return None, idx
+            indent = self._indent_of(self.lines[i])
+            if indent < min_indent:
+                return None, idx
+            content = self._content(i)
+            if content == "-" or content.startswith("- "):
+                return self._parse_sequence(i, indent)
+            return self._parse_mapping(i, indent)
+        finally:
+            self._depth -= 1
 
     def _parse_mapping(self, idx, indent):
         result = {}
