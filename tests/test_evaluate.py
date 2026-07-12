@@ -354,6 +354,34 @@ class WorkflowCallResolution(unittest.TestCase):
         oops = next(r for r in results if r.workflow.path == ".github/workflows/oops.yml")
         self.assertTrue(any("no `workflow_call` trigger" in reason for reason in oops.reasons))
 
+    def test_called_workflow_without_workflow_call_trigger_does_not_fire(self):
+        # Real GitHub behavior: calling a workflow that never declared
+        # `workflow_call:` is rejected at dispatch time, so the target never
+        # runs. Unlike the fixture above, `oops.yml` here has no trigger of
+        # its own that matches this event either, so a bug that force-fires
+        # it just because something called it is actually observable.
+        root = make_repo(
+            {
+                ".github/workflows/caller.yml": (
+                    "on: push\njobs:\n  call:\n    uses: ./.github/workflows/oops.yml\n"
+                ),
+                ".github/workflows/oops.yml": "on: workflow_dispatch\njobs:\n  b:\n    runs-on: u\n",
+            }
+        )
+        workflows = discover(str(root))
+        results = evaluate_all(workflows, Event(name="push", ref="refs/heads/main"))
+        caller = next(r for r in results if r.workflow.path == ".github/workflows/caller.yml")
+        oops = next(r for r in results if r.workflow.path == ".github/workflows/oops.yml")
+        # The caller's own push trigger still matches...
+        self.assertTrue(caller.fires)
+        # ...but GitHub would reject the `uses:` call before either job
+        # starts, so the target must not be reported as firing...
+        self.assertFalse(oops.fires)
+        self.assertTrue(any("no `workflow_call` trigger" in reason for reason in oops.reasons))
+        # ...and the caller needs to know its own job graph is broken too,
+        # not just the target buried in its own reasons.
+        self.assertTrue(any("no `workflow_call` trigger" in reason for reason in caller.reasons))
+
 
 class UnknownEventPassesThrough(unittest.TestCase):
     def test_release_trigger_present_fires(self):

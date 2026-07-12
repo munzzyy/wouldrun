@@ -301,13 +301,23 @@ def _resolve_workflow_calls(workflows, by_path, results):
                         "discovered workflow file"
                     )
                     continue
-                called.setdefault(target_path, []).append(entry)
                 target = by_path[target_path]
                 if not target.parse_error and "workflow_call" not in target.triggers:
-                    called[target_path].append(
-                        f"warning: `{target_path}` has no `workflow_call` trigger; "
-                        "GitHub would reject this call"
+                    # GitHub rejects this at dispatch time: calling a workflow
+                    # that never declared `workflow_call:` fails the run
+                    # before either side's jobs start, so the target must not
+                    # be marked as reached, and the caller needs to know its
+                    # own job is the one that's broken -- not just have a
+                    # warning buried in the unreachable target's reasons.
+                    warning = (
+                        f"job `{job_id}` calls `{target_path}` via `uses:`, but "
+                        f"`{target_path}` has no `workflow_call` trigger; GitHub "
+                        "would reject this call and the run fails before it starts"
                     )
+                    results[caller_path].reasons.append(warning)
+                    results[target_path].reasons.append(warning)
+                    continue
+                called.setdefault(target_path, []).append(entry)
                 if target_path not in seen:
                     seen.add(target_path)
                     next_queue.append(target_path)
