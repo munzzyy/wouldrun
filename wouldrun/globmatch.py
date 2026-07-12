@@ -8,7 +8,8 @@ for `branches`, `branches-ignore`, `tags`, `tags-ignore`, `paths`, and
   **     as a whole path segment, matches zero or more path segments; a
          leading `**/` or trailing `/**` also folds away its own `/`, so
          `**/README.md` matches a root-level `README.md` too
-  ?      exactly one character, but never `/`
+  ?      zero or one of the character (or `[...]` class) immediately
+         before it
   +      one or more of the character (or `[...]` class) immediately
          before it
   [...]  a character class; a leading `!` or `^` negates it
@@ -19,12 +20,12 @@ start to end, the same way GitHub does. Leading `!` negation on an entire
 pattern is a list-level concern (a pattern can flip an earlier match within
 a `paths:`/`branches:` list) and is handled by the caller, not here.
 
-A `**` that shows up in the middle of a single path segment (e.g.
-`foo**bar`, as opposed to `foo/**/bar`) is treated the same as two
-consecutive `*` characters rather than given the cross-slash, folded-slash
-treatment described above. GitHub does not publish a precise grammar for
-that shape and it is vanishingly rare in real workflows, so wouldrun
-documents rather than guesses at it.
+A run of two or more consecutive `*` anywhere in a segment -- not just as
+the whole segment -- crosses `/` the same way: GitHub's cheat sheet gives
+`**.js` as a worked example matching `index.js`, `js/index.js`, and
+`src/js/app.js`. It does not get the folded-slash treatment a whole-segment
+`**` gets (there is no adjoining `/` to fold), only the cross-slash part.
+A single, non-doubled `*` still stops at `/` as described above.
 """
 
 from __future__ import annotations
@@ -93,13 +94,27 @@ def _segment_to_regex(seg):
             i += 2
             continue
         if c == "*":
-            out.append("[^/]*")
+            # A run of two or more consecutive `*` crosses `/` the same
+            # way a whole-segment `**` does -- GitHub's own cheat sheet
+            # gives `**.js` as an example matching `index.js`, `js/index.js`,
+            # and `src/js/app.js`. A lone `*` keeps the old within-segment
+            # behavior.
+            j = i
+            while j < n and seg[j] == "*":
+                j += 1
+            out.append(".*" if j - i >= 2 else "[^/]*")
             last_atom = len(out) - 1
-            i += 1
+            i = j
             continue
         if c == "?":
-            out.append("[^/]")
-            last_atom = len(out) - 1
+            # Same postfix-quantifier treatment as `+` below: GitHub's `?`
+            # means "zero or one of the character immediately before it",
+            # not classic-glob "exactly one arbitrary character".
+            if last_atom is None:
+                out.append(re.escape("?"))
+                last_atom = len(out) - 1
+            else:
+                out[last_atom] = out[last_atom] + "?"
             i += 1
             continue
         if c == "+":

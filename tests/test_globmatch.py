@@ -48,15 +48,60 @@ class DoubleStar(unittest.TestCase):
         self.assertTrue(match("a/**/b.txt", "a/x/y/b.txt"))
         self.assertFalse(match("a/**/b.txt", "a/b.txt.bak"))
 
+    def test_mid_segment_double_star_crosses_slash(self):
+        # GitHub's cheat sheet gives `**.js` as a worked example that
+        # matches all three of these -- unlike a whole-segment `**`
+        # (above), this `**` is only part of a segment, but it still has
+        # to cross `/` the same way.
+        self.assertTrue(match("**.js", "index.js"))
+        self.assertTrue(match("**.js", "js/index.js"))
+        self.assertTrue(match("**.js", "src/js/app.js"))
+
+    def test_single_star_still_does_not_cross_slash(self):
+        # A lone `*` (a run of exactly one) must keep the old
+        # within-segment-only behavior even though star handling now also
+        # has to look for runs of two or more.
+        self.assertTrue(match("a*.js", "axyz.js"))
+        self.assertFalse(match("a*.js", "a/b.js"))
+
+    def test_double_star_segment_boundary_still_requires_the_slash(self):
+        # The mid-segment `**` crosses `/` freely, but a literal `/`
+        # elsewhere in the pattern (here, the one implied by the leading
+        # `*` segment) is still mandatory.
+        self.assertTrue(match("*/**.js", "a/b/app.js"))
+        self.assertTrue(match("*/**.js", "a/app.js"))
+        self.assertFalse(match("*/**.js", "app.js"))
+
 
 class Question(unittest.TestCase):
-    def test_matches_exactly_one_character(self):
-        self.assertTrue(match("Octoc?t", "Octocat"))
-        self.assertFalse(match("Octoc?t", "Octocatt"))
-        self.assertFalse(match("Octoc?t", "Octoct"))
+    def test_zero_or_one_of_preceding_char(self):
+        # GitHub's cheat sheet: `?` matches zero or one of the character
+        # immediately before it -- a postfix quantifier, not "exactly one
+        # arbitrary character" the way classic shell globs use `?`.
+        self.assertTrue(match("v1.?", "v1"))
+        self.assertTrue(match("v1.?", "v1."))
+        self.assertFalse(match("v1.?", "v1.2"))
 
-    def test_does_not_cross_slash(self):
-        self.assertFalse(match("a?b", "a/b"))
+    def test_matches_at_most_one_not_more(self):
+        # Distinguishes `?` from `*`/`+`: two dots is still too many.
+        self.assertFalse(match("v1.?", "v1.."))
+
+    def test_after_char_class(self):
+        self.assertTrue(match("file[0-9]?.txt", "file.txt"))
+        self.assertTrue(match("file[0-9]?.txt", "file5.txt"))
+        self.assertFalse(match("file[0-9]?.txt", "file55.txt"))
+
+    def test_after_star_does_not_cross_slash(self):
+        self.assertTrue(match("a*?.txt", "a.txt"))
+        self.assertTrue(match("a*?.txt", "abc.txt"))
+        self.assertFalse(match("a*?.txt", "a/b.txt"))
+
+    def test_leading_question_mark_has_no_preceding_atom(self):
+        # GitHub doesn't document a `?` with nothing before it to quantify;
+        # wouldrun falls back to a literal `?`, the same way a leading `+`
+        # already does (see the Plus tests below).
+        self.assertTrue(match("?abc", "?abc"))
+        self.assertFalse(match("?abc", "abc"))
 
 
 class Plus(unittest.TestCase):

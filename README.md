@@ -143,9 +143,9 @@ Full flag reference: `wouldrun --help`.
   type you pass with `--type` (falling back to GitHub's default types when you don't).
 - GitHub's filter-pattern glob syntax: `*` (never crosses `/`), `**` (crosses `/`, and
   folds its adjoining `/` so `**/README.md` also matches a root-level `README.md`), `?`
-  (exactly one character), `+` (one or more of the character or `[...]` class before
-  it), `[...]` classes with ranges and negation, and `!` negation within a
-  `paths`/`branches`/etc. list, processed in order the way GitHub processes it.
+  (zero or one of the character before it), `+` (one or more of the character or
+  `[...]` class before it), `[...]` classes with ranges and negation, and `!` negation
+  within a `paths`/`branches`/etc. list, processed in order the way GitHub processes it.
   `tests/test_globmatch.py` includes GitHub's own semver tag example,
   `v[12].[0-9]+.[0-9]+`, as a regression case.
 - `workflow_call`: if workflow A's job calls `./.github/workflows/b.yml` and A fires, B
@@ -171,11 +171,6 @@ Full flag reference: `wouldrun --help`.
   reported as firing whenever the event name matches, with no type-level filtering.
 - It only reads a job's own `uses:` (the reusable-workflow call). It does not parse
   `steps:`, so step-level `uses:` (an action reference) and `if:` are invisible to it.
-- `**` gets the cross-`/`, slash-folding treatment described above only when it is an
-  entire path segment on its own (`docs/**`, `**/x.js`). A `**` embedded inside a
-  segment (`foo**bar`) is treated as two ordinary `*` characters instead. GitHub
-  doesn't publish a grammar for that shape and it is vanishingly rare in real
-  workflows, so this is a documented guess rather than a verified behavior.
 - It resolves `workflow_call` only for same-repo local paths (`./.github/workflows/*`).
   A call into another repo's reusable workflow is reported by name but not followed.
 - It is a static tool. It never pushes, opens a PR, or runs anything — `--diff` only
