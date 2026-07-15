@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="421" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14">
+<rect width="840" height="421" rx="8" fill="#0d1117"/>
+<rect width="840" height="30" rx="8" fill="#161b22"/>
+<rect y="22" width="840" height="8" fill="#161b22"/>
+<circle cx="18" cy="15" r="5.5" fill="#ff5f57"/>
+<circle cx="38" cy="15" r="5.5" fill="#febc2e"/>
+<circle cx="58" cy="15" r="5.5" fill="#28c840"/>
+<text x="420" y="19" text-anchor="middle" fill="#8b949e" font-size="12">wouldrun examples/example-repo --event push --ref refs/heads/main --changed src/app.py</text>
+<text x="16.0" y="44" fill="#98c379" font-weight="normal" xml:space="preserve">$</text>
+<text x="24.4" y="44" fill="#abb2bf" font-weight="normal" xml:space="preserve"> wouldrun examples/example-repo --event push --ref refs/heads/main --changed src/app.py</text>
+<text x="16.0" y="82" fill="#abb2bf" font-weight="normal" xml:space="preserve">  wouldrun  event=push  4 workflow(s), 1 would fire</text>
+<text x="16.0" y="120" fill="#abb2bf" font-weight="normal" xml:space="preserve">  </text>
+<text x="32.8" y="120" fill="#98c379" font-weight="normal" xml:space="preserve"> FIRES   </text>
+<text x="108.6" y="120" fill="#abb2bf" font-weight="normal" xml:space="preserve"> CI  [.github/workflows/ci.yml]</text>
+<text x="16.0" y="139" fill="#abb2bf" font-weight="normal" xml:space="preserve">           branch `main`: matches `branches: [&#x27;main&#x27;]`</text>
+<text x="16.0" y="158" fill="#abb2bf" font-weight="normal" xml:space="preserve">           `paths: [&#x27;src/**&#x27;, &#x27;!src/**/*.md&#x27;]` matches changed file `src/app.py`</text>
+<text x="16.0" y="177" fill="#abb2bf" font-weight="normal" xml:space="preserve">           jobs: test</text>
+<text x="16.0" y="215" fill="#abb2bf" font-weight="normal" xml:space="preserve">  </text>
+<text x="32.8" y="215" fill="#5c6370" font-weight="normal" xml:space="preserve"> SKIPPED </text>
+<text x="108.6" y="215" fill="#abb2bf" font-weight="normal" xml:space="preserve"> Docs  [.github/workflows/docs.yml]</text>
+<text x="16.0" y="234" fill="#abb2bf" font-weight="normal" xml:space="preserve">           branch `main`: matches `branches: [&#x27;main&#x27;]`</text>
+<text x="16.0" y="253" fill="#abb2bf" font-weight="normal" xml:space="preserve">           `paths-ignore: [&#x27;src/**&#x27;]` covers every changed file ([&#x27;src/app.py&#x27;])</text>
+<text x="16.0" y="291" fill="#abb2bf" font-weight="normal" xml:space="preserve">  </text>
+<text x="32.8" y="291" fill="#5c6370" font-weight="normal" xml:space="preserve"> SKIPPED </text>
+<text x="108.6" y="291" fill="#abb2bf" font-weight="normal" xml:space="preserve"> Release  [.github/workflows/release.yml]</text>
+<text x="16.0" y="310" fill="#abb2bf" font-weight="normal" xml:space="preserve">           branch `main`: this push trigger only filters `tags`/`tags-ignore`, so branch pushes </text>
+<text x="16.0" y="329" fill="#abb2bf" font-weight="normal" xml:space="preserve">  never match it</text>
+<text x="16.0" y="367" fill="#abb2bf" font-weight="normal" xml:space="preserve">  </text>
+<text x="32.8" y="367" fill="#5c6370" font-weight="normal" xml:space="preserve"> SKIPPED </text>
+<text x="108.6" y="367" fill="#abb2bf" font-weight="normal" xml:space="preserve"> .github/workflows/reusable-deploy.yml  [.github/workflows/reusable-deploy.yml]</text>
+<text x="16.0" y="386" fill="#abb2bf" font-weight="normal" xml:space="preserve">           no `push` trigger (this workflow listens for: workflow_call)</text>
+</svg>

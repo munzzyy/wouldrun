@@ -4,6 +4,8 @@
 [![License: Prosperity 3.0.0](https://img.shields.io/badge/license-Prosperity--3.0.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 
+![wouldrun evaluating a push to src/app.py: CI fires on the src/** path filter while Docs, Release, and the reusable deploy workflow each skip for a stated reason](docs/media/demo.svg)
+
 Answers "given this push, PR, or set of changed files, which of my GitHub Actions
 workflows would actually run, and why?" wouldrun reads every workflow under
 `.github/workflows/`, resolves the `on:` triggers, branch/tag filters, and path filters
