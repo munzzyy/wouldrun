@@ -22,3 +22,7 @@ htmlcov/
 *.swp
 .DS_Store
 Thumbs.db
+
+# stray scratch reproductions (never commit these)
+/test_*.py
+/test_repo/
