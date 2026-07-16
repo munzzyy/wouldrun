@@ -1,7 +1,7 @@
 # wouldrun
 
 [![CI](https://github.com/munzzyy/wouldrun/actions/workflows/ci.yml/badge.svg)](https://github.com/munzzyy/wouldrun/actions/workflows/ci.yml)
-[![License: Prosperity 3.0.0](https://img.shields.io/badge/license-Prosperity--3.0.0-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 
 ![wouldrun evaluating a push to src/app.py: CI fires on the src/** path filter while Docs, Release, and the reusable deploy workflow each skip for a stated reason](docs/media/demo.svg)
@@ -203,4 +203,4 @@ fixed; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Prosperity Public License 3.0.0 — free for noncommercial use, thirty-day trial for commercial use. See [LICENSE](LICENSE). Contributions come in under the Blue Oak Model License; see [CONTRIBUTING.md](CONTRIBUTING.md).
+MIT — free to use, change, and ship, commercial or not. See [LICENSE](LICENSE).
