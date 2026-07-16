@@ -204,3 +204,7 @@ fixed; see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 MIT — free to use, change, and ship, commercial or not. See [LICENSE](LICENSE).
+
+## Support
+
+If wouldrun saved you a push just to see what fires, [sponsoring](https://github.com/sponsors/munzzyy) is what keeps it maintained.
