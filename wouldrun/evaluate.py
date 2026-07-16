@@ -123,8 +123,26 @@ def _cron_list(spec):
     return out
 
 
+def _as_filter_list(value):
+    """A branches/tags/paths/types filter may be written as a single string or
+    a list of strings -- GitHub accepts both (`branches: main` means the same
+    as `branches: [main]`). Normalize to a non-empty list of strings, or None
+    when there is no usable filter. Dropping the scalar form (the old
+    `isinstance(v, list)` check) silently turned a real one-branch filter into
+    "no filter, matches any ref"."""
+    if isinstance(value, str):
+        return [value] if value else None
+    if isinstance(value, list):
+        items = [v for v in value if isinstance(v, str) and v]
+        return items or None
+    return None
+
+
 def _evaluate_push(spec, event: Event):
-    spec = spec or {}
+    # `on.push` should be a mapping (or null). A scalar or list here -- e.g. the
+    # common `on: push: main` mistake -- must not crash the run and take every
+    # other workflow down with it; treat it as an unfiltered push.
+    spec = spec if isinstance(spec, dict) else {}
     reasons = []
     branches, branches_ignore = _resolve_pair(spec, "branches", "branches-ignore", reasons)
     tags, tags_ignore = _resolve_pair(spec, "tags", "tags-ignore", reasons)
@@ -144,13 +162,13 @@ def _evaluate_push(spec, event: Event):
 
 
 def _evaluate_pull_request(event_name, spec, event: Event):
-    spec = spec or {}
+    spec = spec if isinstance(spec, dict) else {}
     reasons = []
 
-    types = spec.get("types")
+    types = _as_filter_list(spec.get("types"))
     default_types = _PR_DEFAULT_TYPES[event_name]
     activity = event.activity_type or default_types[0]
-    if isinstance(types, list) and types:
+    if types:
         if activity not in types:
             reasons.append(f"activity type `{activity}` is not in `types: {types}`")
             return False, reasons
@@ -182,10 +200,8 @@ def _evaluate_pull_request(event_name, spec, event: Event):
 
 
 def _resolve_pair(spec, include_key, exclude_key, reasons):
-    include = spec.get(include_key)
-    exclude = spec.get(exclude_key)
-    include = include if isinstance(include, list) and include else None
-    exclude = exclude if isinstance(exclude, list) and exclude else None
+    include = _as_filter_list(spec.get(include_key))
+    exclude = _as_filter_list(spec.get(exclude_key))
     if include and exclude:
         reasons.append(
             f"workflow declares both `{include_key}` and `{exclude_key}`, which GitHub "

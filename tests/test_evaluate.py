@@ -34,6 +34,43 @@ class PushBranches(unittest.TestCase):
         self.assertTrue(r.fires)
 
 
+class ScalarFilterForms(unittest.TestCase):
+    # GitHub accepts a bare string wherever a filter list is allowed:
+    # `branches: main` means `branches: [main]`. The old code kept only lists,
+    # so a scalar filter was dropped and read as "no filter, matches any ref".
+    def test_scalar_branch_filter_skips_other_branch(self):
+        text = "on:\n  push:\n    branches: main\njobs:\n  b:\n    runs-on: u\n"
+        self.assertFalse(_run(text, Event(name="push", ref="refs/heads/feature")).fires)
+
+    def test_scalar_branch_filter_matches_named_branch(self):
+        text = "on:\n  push:\n    branches: main\njobs:\n  b:\n    runs-on: u\n"
+        self.assertTrue(_run(text, Event(name="push", ref="refs/heads/main")).fires)
+
+    def test_scalar_paths_filter_skips_unmatched_file(self):
+        text = "on:\n  push:\n    paths: 'src/**'\njobs:\n  b:\n    runs-on: u\n"
+        e = Event(name="push", ref="refs/heads/main", changed_files=["docs/readme.md"])
+        self.assertFalse(_run(text, e).fires)
+
+    def test_scalar_pr_types_filter(self):
+        text = "on:\n  pull_request:\n    types: opened\njobs:\n  b:\n    runs-on: u\n"
+        opened = Event(name="pull_request", ref="refs/heads/x", activity_type="opened")
+        closed = Event(name="pull_request", ref="refs/heads/x", activity_type="closed")
+        self.assertTrue(_run(text, opened).fires)
+        self.assertFalse(_run(text, closed).fires)
+
+
+class MalformedTriggerDoesNotCrash(unittest.TestCase):
+    # `on: push: main` is a common mistake -- a scalar where a mapping belongs.
+    # It must degrade to an unfiltered trigger, not raise and abort the whole run.
+    def test_string_push_trigger_degrades(self):
+        text = "on:\n  push: main\njobs:\n  b:\n    runs-on: u\n"
+        self.assertTrue(_run(text, Event(name="push", ref="refs/heads/anything")).fires)
+
+    def test_list_pull_request_trigger_degrades(self):
+        text = "on:\n  pull_request: [opened]\njobs:\n  b:\n    runs-on: u\n"
+        self.assertTrue(_run(text, Event(name="pull_request", ref="refs/heads/x")).fires)
+
+
 class PushBranchesIgnore(unittest.TestCase):
     TEXT = "on:\n  push:\n    branches-ignore: [dev]\njobs:\n  b:\n    runs-on: u\n"
 
