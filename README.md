@@ -130,6 +130,58 @@ report into something else without tripping `set -e`.
 
 Full flag reference: `wouldrun --help`.
 
+## GitHub Action
+
+`action.yml` at the repo root wraps the CLI as a composite Action for any repo's
+own pull requests: it checks out the PR, runs wouldrun against the PR's base and
+changed files, and reports the FIRES/SKIPPED table.
+
+By default that report only goes to the job summary — nothing posted anywhere,
+no permission beyond the default `contents: read`:
+
+```yaml
+on:
+  pull_request:
+
+jobs:
+  wouldrun:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: munzzyy/wouldrun@main
+```
+
+Posting that same table as a PR comment is opt-in, `post-comment: "true"`, and
+needs `pull-requests: write` on the job:
+
+```yaml
+on:
+  pull_request:
+
+jobs:
+  wouldrun:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: munzzyy/wouldrun@main
+        with:
+          post-comment: "true"
+```
+
+Opt-in instead of default-on because a bot that comments on every push is a
+common reason people end up muting or removing an Action, and
+`pull-requests: write` is a real trust bar above a job that only reads. The
+comment path finds and updates a single existing comment (by a hidden
+`<!-- wouldrun -->` marker, checked on every run) instead of posting a new one
+each time, so a PR carries at most one wouldrun comment no matter how many
+times it's pushed to.
+
+No tagged release exists yet, so `@main` above tracks whatever's on `main` when
+the job runs. Pin to a commit SHA instead if you want that to stop moving.
+
 ## What it checks
 
 - `on:` triggers in every shorthand: bare string, list, and mapping form.

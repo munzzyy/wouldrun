@@ -1,0 +1,140 @@
+name: wouldrun
+description: >-
+  Work out which GitHub Actions workflows a pull request would trigger, and
+  report it as a job summary or, opt-in, a sticky PR comment.
+author: "Cole Munz"
+
+branding:
+  icon: "git-pull-request"
+  color: "blue"
+
+inputs:
+  post-comment:
+    description: >-
+      Post the FIRES/SKIPPED table as a single sticky PR comment, found and
+      updated in place on every later run instead of piling up a new comment
+      per push. Opt-in: needs `pull-requests: write` on the calling job.
+      Default "false" writes the same table to $GITHUB_STEP_SUMMARY instead,
+      which needs no extra permission.
+    required: false
+    default: "false"
+  github-token:
+    description: >-
+      Token used to read and update the sticky PR comment. Only used when
+      post-comment is "true"; ignored otherwise.
+    required: false
+    default: ${{ github.token }}
+  python-version:
+    description: Python version used to install and run wouldrun.
+    required: false
+    default: "3.x"
+
+runs:
+  using: composite
+  steps:
+    - name: Check for a pull_request context
+      # This action only has something to evaluate on a pull_request (or
+      # pull_request_target) event -- there's no PR base/changed-files to
+      # diff against otherwise. Guard here instead of letting a later step
+      # fail with a confusing git or argument error if someone wires this
+      # into a different trigger by mistake.
+      id: guard
+      shell: bash
+      run: |
+        if [ -z "${{ github.event.pull_request.number }}" ]; then
+          {
+            echo "wouldrun: no pull_request context on this event "
+            echo "(event=\`${{ github.event_name }}\`); nothing to evaluate against, skipping."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Checkout
+      if: steps.guard.outputs.skip != 'true'
+      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      with:
+        persist-credentials: false
+        # Full history for every branch, not just the checked-out ref --
+        # `--diff` below needs a local `origin/<base>` to diff against, and
+        # a fresh, full fetch on every run is also what makes this correct
+        # across force-pushes and re-runs: there's no stale cached ref to
+        # go out of date, it's refetched from scratch each time.
+        fetch-depth: 0
+
+    - name: Set up Python
+      if: steps.guard.outputs.skip != 'true'
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install wouldrun
+      # Not on PyPI yet, so install from this action's own checkout --
+      # GitHub Actions already fetched this exact ref of the wouldrun repo
+      # to `github.action_path` in order to run this composite action, so
+      # it's the one copy guaranteed to match what's running.
+      if: steps.guard.outputs.skip != 'true'
+      shell: bash
+      run: python3 -m pip install --quiet "${{ github.action_path }}"
+
+    - name: Run wouldrun against the PR's base and changed files
+      if: steps.guard.outputs.skip != 'true'
+      shell: bash
+      run: |
+        set -e
+        base="${{ github.event.pull_request.base.ref }}"
+        python3 -m wouldrun . \
+          --event "${{ github.event_name }}" \
+          --base "$base" \
+          --type "${{ github.event.action }}" \
+          --diff "origin/$base" \
+          --json > "$RUNNER_TEMP/wouldrun.json"
+
+    - name: Format the report as markdown
+      if: steps.guard.outputs.skip != 'true'
+      shell: bash
+      run: python3 -m wouldrun.pr_format "$RUNNER_TEMP/wouldrun.json" > "$RUNNER_TEMP/wouldrun.md"
+
+    - name: Write job summary
+      if: steps.guard.outputs.skip != 'true' && inputs.post-comment != 'true'
+      shell: bash
+      run: cat "$RUNNER_TEMP/wouldrun.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Post or update the sticky PR comment
+      # Finds the comment this action owns by its hidden marker (see
+      # wouldrun/pr_format.py) and edits it in place; only creates a new one
+      # the first time no such comment exists yet. That's what keeps a
+      # force-push or a re-run from adding a second comment: the marker
+      # search runs fresh every time against every comment on the PR, so it
+      # doesn't matter whether this is the first run or the fiftieth.
+      if: steps.guard.outputs.skip != 'true' && inputs.post-comment == 'true'
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require("fs");
+          const body = fs.readFileSync(process.env.WOULDRUN_MD, "utf8");
+          const marker = "<!-- wouldrun -->";
+          const { owner, repo } = context.repo;
+          const issue_number = context.payload.pull_request.number;
+
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            owner,
+            repo,
+            issue_number,
+          });
+          const existing = comments.find((c) => c.body && c.body.includes(marker));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner,
+              repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+          }
+      env:
+        WOULDRUN_MD: ${{ runner.temp }}/wouldrun.md

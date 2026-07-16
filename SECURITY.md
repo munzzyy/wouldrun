@@ -12,6 +12,14 @@ last one matters if you use wouldrun to decide what needs review - is a
 vulnerability here. Plain wrong answers on well-formed workflows are ordinary
 bugs; an issue with the workflow file attached is perfect.
 
+The composite Action (`action.yml`) is a different trust boundary from the CLI
+above: it installs wouldrun over pip and, only when `post-comment: "true"` is
+set, calls the GitHub API to read and write a PR comment. That comment path is
+the one part of this project that needs a write-scoped token
+(`pull-requests: write`) and talks to the network beyond a plain package
+install; see the README's GitHub Action section for why it's opt-in rather
+than the default.
+
 ## Reporting a vulnerability
 
 Please don't open a public issue for security problems. Use GitHub's private
