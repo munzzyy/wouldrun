@@ -53,7 +53,7 @@ runs:
 
     - name: Checkout
       if: steps.guard.outputs.skip != 'true'
-      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         persist-credentials: false
         # Full history for every branch, not just the checked-out ref --
@@ -109,7 +109,7 @@ runs:
       # search runs fresh every time against every comment on the PR, so it
       # doesn't matter whether this is the first run or the fiftieth.
       if: steps.guard.outputs.skip != 'true' && inputs.post-comment == 'true'
-      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       with:
         github-token: ${{ inputs.github-token }}
         script: |
