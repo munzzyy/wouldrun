@@ -309,6 +309,93 @@ class PullRequestTypes(unittest.TestCase):
         r = _run(text, Event(name="pull_request", activity_type="labeled"))
         self.assertTrue(r.fires)
 
+    def test_non_default_activity_without_types_filter_skips(self):
+        # A workflow with no `types:` runs only on GitHub's default PR
+        # activity types (opened, synchronize, reopened). A `--type labeled`
+        # event must SKIP it, not FIRE -- the no-types branch used to ignore
+        # the activity type entirely.
+        text = "on:\n  pull_request:\n    branches: [main]\njobs:\n  b:\n    runs-on: u\n"
+        r = _run(text, Event(name="pull_request", base_ref="main", activity_type="labeled"))
+        self.assertFalse(r.fires)
+        r2 = _run(text, Event(name="pull_request", base_ref="main", activity_type="closed"))
+        self.assertFalse(r2.fires)
+
+    def test_default_activity_without_types_filter_still_fires(self):
+        text = "on:\n  pull_request:\n    branches: [main]\njobs:\n  b:\n    runs-on: u\n"
+        r = _run(text, Event(name="pull_request", base_ref="main", activity_type="synchronize"))
+        self.assertTrue(r.fires)
+
+
+class PullRequestFullRefBase(unittest.TestCase):
+    # `--ref` accepts a full `refs/heads/...`; `--base` must normalize it the
+    # same way instead of matching the whole ref literally against a branch
+    # filter (which never matches -> a false SKIP).
+    TEXT = "on:\n  pull_request:\n    branches: [main]\njobs:\n  b:\n    runs-on: u\n"
+
+    def test_full_ref_base_matches_branch_filter(self):
+        r = _run(self.TEXT, Event(name="pull_request", base_ref="refs/heads/main"))
+        self.assertTrue(r.fires)
+
+    def test_short_base_still_matches(self):
+        r = _run(self.TEXT, Event(name="pull_request", base_ref="main"))
+        self.assertTrue(r.fires)
+
+
+class TagPushIgnoresPathFilter(unittest.TestCase):
+    # GitHub does not evaluate `paths`/`paths-ignore` for tag pushes, so a tag
+    # whose ref filter matches fires regardless of the changed files. Applying
+    # the path filter would falsely SKIP release workflows.
+    TEXT = "on:\n  push:\n    tags: ['v*']\n    paths: ['src/**']\njobs:\n  b:\n    runs-on: u\n"
+
+    def test_tag_push_fires_even_when_no_path_matches(self):
+        r = _run(
+            self.TEXT,
+            Event(name="push", ref="refs/tags/v1.0.0", changed_files=["README.md"]),
+        )
+        self.assertTrue(r.fires)
+
+    def test_tag_push_fires_with_no_changed_files_given(self):
+        r = _run(self.TEXT, Event(name="push", ref="refs/tags/v1.0.0", changed_files=[]))
+        self.assertTrue(r.fires)
+
+    def test_tag_that_fails_the_ref_filter_still_skips(self):
+        r = _run(self.TEXT, Event(name="push", ref="refs/tags/rc-1", changed_files=["README.md"]))
+        self.assertFalse(r.fires)
+
+    def test_branch_push_still_applies_path_filter(self):
+        text = "on:\n  push:\n    branches: [main]\n    paths: ['src/**']\njobs:\n  b:\n    runs-on: u\n"
+        r = _run(text, Event(name="push", ref="refs/heads/main", changed_files=["README.md"]))
+        self.assertFalse(r.fires)
+
+
+class IndentlessBranchSequenceEvaluates(unittest.TestCase):
+    # End-to-end: a flush (indentless) block sequence for `branches:` must
+    # parse and drive the ref filter, not report the workflow as unparseable.
+    TEXT = "on:\n  push:\n    branches:\n    - main\n    - dev\njobs:\n  b:\n    runs-on: u\n"
+
+    def test_listed_branch_fires(self):
+        r = _run(self.TEXT, Event(name="push", ref="refs/heads/main"))
+        self.assertTrue(r.fires)
+
+    def test_unlisted_branch_skips(self):
+        r = _run(self.TEXT, Event(name="push", ref="refs/heads/feature"))
+        self.assertFalse(r.fires)
+
+
+class MultilineFlowBranchFilterEvaluates(unittest.TestCase):
+    # End-to-end: a branch filter written as a multi-line flow list must be
+    # applied, not silently dropped (which read as "matches any ref" and
+    # truncated the rest of the file).
+    TEXT = "on:\n  push:\n    branches: [\n      main,\n      release\n    ]\njobs:\n  b:\n    runs-on: u\n"
+
+    def test_listed_branch_fires(self):
+        r = _run(self.TEXT, Event(name="push", ref="refs/heads/main"))
+        self.assertTrue(r.fires)
+
+    def test_unlisted_branch_skips(self):
+        r = _run(self.TEXT, Event(name="push", ref="refs/heads/feature-x"))
+        self.assertFalse(r.fires)
+
 
 class NoMatchingTrigger(unittest.TestCase):
     def test_event_not_in_triggers_skips(self):

@@ -146,11 +146,14 @@ class _Parser:
             key, rest = split
             if rest == "":
                 value, next_i = self.parse_block(real + 1, indent + 1)
+                if value is None:
+                    seq = self._indentless_sequence(next_i, indent)
+                    if seq is not None:
+                        value, next_i = seq
             elif _BLOCK_SCALAR_RE.match(rest):
                 value, next_i = self._consume_block_scalar(real, indent)
             else:
-                value = _parse_scalar_or_flow(rest)
-                next_i = real + 1
+                value, next_i = self._flow_value(rest, real)
             result[key] = value
             i = next_i
         return result, i
@@ -186,11 +189,14 @@ class _Parser:
                 mapping = {}
                 if kv_rest == "":
                     value, next_i = self.parse_block(real + 1, item_indent + 1)
+                    if value is None:
+                        seq = self._indentless_sequence(next_i, item_indent)
+                        if seq is not None:
+                            value, next_i = seq
                 elif _BLOCK_SCALAR_RE.match(kv_rest):
                     value, next_i = self._consume_block_scalar_at(real, item_indent, kv_rest)
                 else:
-                    value = _parse_scalar_or_flow(kv_rest)
-                    next_i = real + 1
+                    value, next_i = self._flow_value(kv_rest, real)
                 mapping[key] = value
                 more, next_i = self._parse_mapping_continuation(next_i, item_indent, mapping)
                 result.append(more)
@@ -200,8 +206,9 @@ class _Parser:
                 result.append(value)
                 i = next_i
             else:
-                result.append(_parse_scalar_or_flow(rest))
-                i = real + 1
+                value, next_i = self._flow_value(rest, real)
+                result.append(value)
+                i = next_i
         return result, i
 
     def _parse_mapping_continuation(self, idx, indent, mapping):
@@ -222,11 +229,14 @@ class _Parser:
             key, rest = split
             if rest == "":
                 value, next_i = self.parse_block(real + 1, indent + 1)
+                if value is None:
+                    seq = self._indentless_sequence(next_i, indent)
+                    if seq is not None:
+                        value, next_i = seq
             elif _BLOCK_SCALAR_RE.match(rest):
                 value, next_i = self._consume_block_scalar(real, indent)
             else:
-                value = _parse_scalar_or_flow(rest)
-                next_i = real + 1
+                value, next_i = self._flow_value(rest, real)
             mapping[key] = value
             i = next_i
         return mapping, i
@@ -263,6 +273,82 @@ class _Parser:
         while out and out[-1] == "":
             out.pop()
         return "\n".join(out), last_content + 1
+
+    def _indentless_sequence(self, idx, indent):
+        """A block sequence whose `-` items sit at the SAME indent as their
+        parent key -- e.g.
+
+            branches:
+            - main
+            - dev
+
+        This is valid YAML and GitHub's parser accepts it, but parse_block
+        requires a child to be indented deeper than its key, so it skips the
+        items and the mapping loop then chokes on the bare `- main` line.
+        Called only when parse_block found nothing, this picks the flush
+        sequence up. Returns (value, next_i), or None if the next real line
+        is not such a sequence."""
+        seq_i = self._next_real(idx)
+        if seq_i is None or self._indent_of(self.lines[seq_i]) != indent:
+            return None
+        content = self._content(seq_i)
+        if content == "-" or content.startswith("- "):
+            return self._parse_sequence(seq_i, indent)
+        return None
+
+    def _flow_value(self, rest, real):
+        """Resolve a scalar or flow value that starts with `rest` on line
+        `real`. A flow collection (`[...]` / `{...}`) may span several
+        physical lines, so gather following lines until its brackets balance
+        before parsing. Returns (value, next_line_index)."""
+        if rest and rest[0] in "[{":
+            text, end = self._gather_flow(rest, real)
+            return _parse_scalar_or_flow(text), end + 1
+        return _parse_scalar_or_flow(rest), real + 1
+
+    def _gather_flow(self, rest, line_idx):
+        """`rest` opens a flow collection. If its brackets don't close on this
+        physical line, join the following lines until they do (multi-line flow
+        is standard YAML). Returns (combined_text, last_line_idx)."""
+        depth = _flow_depth(rest)
+        i = line_idx
+        parts = [rest]
+        while depth > 0 and i + 1 < self.n:
+            i += 1
+            segment = self._content(i)
+            parts.append(segment)
+            depth += _flow_depth(segment)
+        return " ".join(parts), i
+
+
+def _flow_depth(text):
+    """Net `[`/`{` minus `]`/`}` nesting in `text`, ignoring brackets that sit
+    inside quoted scalars."""
+    depth = 0
+    in_squote = in_dquote = False
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if in_squote:
+            if c == "'":
+                in_squote = False
+        elif in_dquote:
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                in_dquote = False
+        else:
+            if c == "'":
+                in_squote = True
+            elif c == '"':
+                in_dquote = True
+            elif c in "[{":
+                depth += 1
+            elif c in "]}":
+                depth -= 1
+        i += 1
+    return depth
 
 
 def _strip_comment(line):
@@ -398,6 +484,7 @@ class _FlowParser:
         self.s = s
         self.i = 0
         self.n = len(s)
+        self._depth = 0
 
     def parse(self):
         self._ws()
@@ -412,10 +499,17 @@ class _FlowParser:
         if self.i >= self.n:
             return None
         c = self.s[self.i]
-        if c == "[":
-            return self._list()
-        if c == "{":
-            return self._map()
+        if c == "[" or c == "{":
+            # Cap flow nesting the same way parse_block caps block nesting, so
+            # a crafted `[[[[...` can't blow Python's stack (a bare
+            # RecursionError) instead of degrading to a clean YamlError.
+            self._depth += 1
+            if self._depth > MAX_DEPTH:
+                raise YamlError(f"flow nesting exceeds {MAX_DEPTH} levels")
+            try:
+                return self._list() if c == "[" else self._map()
+            finally:
+                self._depth -= 1
         if c in ("'", '"'):
             return self._quoted()
         return self._plain()
@@ -433,11 +527,16 @@ class _FlowParser:
             if self.i < self.n and self.s[self.i] == ",":
                 self.i += 1
                 self._ws()
+                if self.i < self.n and self.s[self.i] == "]":
+                    self.i += 1
+                    return out
                 continue
             if self.i < self.n and self.s[self.i] == "]":
                 self.i += 1
-            break
-        return out
+                return out
+            # No closing `]`: raise rather than silently return a truncated
+            # list, which would drop the rest of the value with no error.
+            raise YamlError(f"unterminated flow sequence: {self.s!r}")
 
     def _map(self):
         self.i += 1
@@ -457,11 +556,14 @@ class _FlowParser:
             self._ws()
             if self.i < self.n and self.s[self.i] == ",":
                 self.i += 1
+                if self.i < self.n and self.s[self.i] == "}":
+                    self.i += 1
+                    return out
                 continue
             if self.i < self.n and self.s[self.i] == "}":
                 self.i += 1
-            break
-        return out
+                return out
+            raise YamlError(f"unterminated flow mapping: {self.s!r}")
 
     def _quoted(self):
         quote = self.s[self.i]

@@ -50,6 +50,36 @@ class GitDiff(unittest.TestCase):
         changed = changed_files_from_diff("HEAD", repo_root=str(root))
         self.assertIn("src/new.py", changed)
 
+    def test_diff_uses_merge_base_not_two_dot(self):
+        # `git diff BASE` is a two-dot diff: once BASE advances past where this
+        # branch forked, commits added to BASE show up as "changed files" the
+        # branch never touched. GitHub evaluates PR path filters against the
+        # PR's own changes (merge-base semantics), so wouldrun must too.
+        root = _make_git_repo()  # main has a.txt + src/app.py
+        _git(root, "checkout", "-q", "-b", "feature")
+        (Path(root) / "src" / "app.py").write_text("print(3)\n", encoding="utf-8")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "feature edits src")
+        # main advances with an unrelated file after the fork point.
+        _git(root, "checkout", "-q", "main")
+        (Path(root) / "a.txt").write_text("changed on main\n", encoding="utf-8")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "main drifts")
+        _git(root, "checkout", "-q", "feature")
+        changed = changed_files_from_diff("main", repo_root=str(root))
+        # The branch only touched src/app.py; base drift on a.txt must not leak.
+        self.assertEqual(changed, ["src/app.py"])
+
+    def test_diff_still_counts_uncommitted_tracked_changes(self):
+        # Diffing against the merge-base *commit* (not the BASE...HEAD range)
+        # keeps uncommitted working-tree edits in the result -- seeing those is
+        # half the point of running wouldrun locally.
+        root = _make_git_repo()
+        _git(root, "checkout", "-q", "-b", "feature")
+        (Path(root) / "a.txt").write_text("uncommitted edit\n", encoding="utf-8")
+        changed = changed_files_from_diff("main", repo_root=str(root))
+        self.assertIn("a.txt", changed)
+
     def test_invalid_base_raises_clear_error_not_traceback(self):
         root = _make_git_repo()
         with self.assertRaises(GitDiffError):

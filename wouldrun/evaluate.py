@@ -153,6 +153,18 @@ def _evaluate_push(spec, event: Event):
     if not ok:
         return False, reasons
 
+    is_tag, _ = classify_ref(event.ref)
+    if is_tag and (paths or paths_ignore):
+        # GitHub does not evaluate `paths`/`paths-ignore` for tag pushes, so a
+        # tag whose ref filter already matched fires regardless of the changed
+        # files -- applying the path filter here would falsely SKIP release
+        # workflows.
+        reasons.append(
+            "tag push: GitHub does not evaluate `paths`/`paths-ignore` for tag "
+            "pushes; matches regardless of changed files"
+        )
+        return True, reasons
+
     ok, why = _match_paths(event.changed_files, paths, paths_ignore)
     reasons.append(why)
     if not ok:
@@ -174,6 +186,12 @@ def _evaluate_pull_request(event_name, spec, event: Event):
             return False, reasons
         reasons.append(f"activity type `{activity}` matches `types: {types}`")
     else:
+        if event.activity_type and event.activity_type not in default_types:
+            reasons.append(
+                f"activity type `{activity}` is not among GitHub's default types "
+                f"{default_types} and this workflow declares no `types:` filter"
+            )
+            return False, reasons
         reasons.append(
             f"no `types` filter; GitHub's default types for {event_name} are "
             f"{default_types}, assuming `{activity}`"
@@ -184,6 +202,12 @@ def _evaluate_pull_request(event_name, spec, event: Event):
 
     if branches or branches_ignore:
         base = event.base_ref or "main"
+        # Accept a full `refs/heads/...` base the same way the push path
+        # normalizes `--ref` -- otherwise a full-ref base silently matches no
+        # branch filter. A `refs/tags/...` base is nonsense for a PR, so it is
+        # left untouched and simply fails the match.
+        if base.startswith("refs/heads/"):
+            base = base[len("refs/heads/") :]
         ok, why = _match_glob_list(base, branches, branches_ignore, "branches", "branches-ignore")
         reasons.append(f"base branch `{base}`: {why}")
         if not ok:

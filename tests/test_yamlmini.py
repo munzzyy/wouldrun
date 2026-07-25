@@ -99,6 +99,18 @@ class BlockCollections(unittest.TestCase):
         doc = load("on:\n  push:\n  pull_request:\n")
         self.assertEqual(doc, {"on": {"push": None, "pull_request": None}})
 
+    def test_indentless_block_sequence_under_key(self):
+        # A block sequence whose `-` items sit at the SAME indent as their
+        # parent key is valid YAML that GitHub's parser accepts. The old
+        # reader required a deeper indent and choked on the bare `- main`
+        # line with a "malformed mapping line" error.
+        doc = load("on:\n  push:\n    branches:\n    - main\n    - dev\n")
+        self.assertEqual(doc, {"on": {"push": {"branches": ["main", "dev"]}}})
+
+    def test_indentless_top_level_sequence(self):
+        doc = load("on:\n- push\n- pull_request\n")
+        self.assertEqual(doc, {"on": ["push", "pull_request"]})
+
 
 class FlowCollections(unittest.TestCase):
     def test_inline_list(self):
@@ -115,6 +127,31 @@ class FlowCollections(unittest.TestCase):
 
     def test_empty_inline_list(self):
         self.assertEqual(load("x: []"), {"x": []})
+
+    def test_multiline_flow_sequence_is_joined(self):
+        # A flow list whose brackets don't close on the same physical line is
+        # standard YAML. The old reader saw only the `[` on the first line,
+        # returned `[None]`, and silently dropped both the real items and
+        # every following line -- including a whole `jobs:` section.
+        doc = load("branches: [\n  main,\n  release\n]\njobs:\n  test: {}\n")
+        self.assertEqual(doc["branches"], ["main", "release"])
+        self.assertEqual(doc["jobs"], {"test": {}})
+
+    def test_multiline_flow_mapping_is_joined(self):
+        doc = load("x: {\n  a: 1,\n  b: 2\n}\ny: 3\n")
+        self.assertEqual(doc, {"x": {"a": 1, "b": 2}, "y": 3})
+
+    def test_unterminated_flow_sequence_raises(self):
+        # An unterminated flow collection must be a loud parse error, not a
+        # silent truncation of the rest of the value.
+        with self.assertRaises(YamlError):
+            load("x: [a, b\ny: 1\n")
+
+    def test_flow_nesting_cap_is_a_yaml_error_not_a_recursion_error(self):
+        # `[[[[...` past the nesting cap must degrade to a clean YamlError
+        # like the block path already does, not blow Python's call stack.
+        with self.assertRaises(YamlError):
+            load("on: " + "[" * 50000)
 
 
 class BlockScalars(unittest.TestCase):

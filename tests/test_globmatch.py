@@ -162,5 +162,39 @@ class Malformed(unittest.TestCase):
         self.assertTrue(match("a[b", "a[b"))
 
 
+class NoCatastrophicBacktracking(unittest.TestCase):
+    def test_pathological_star_pattern_returns_quickly(self):
+        # A legal filter full of `*` interleaved with a literal used to send
+        # the regex engine into catastrophic backtracking and hang the whole
+        # run -- which SECURITY.md classes as a vulnerability, since workflow
+        # files are third-party input here. The linear matcher answers fast.
+        import time
+
+        pattern = "*a" * 20 + "*!"
+        value = "a" * 46
+        start = time.perf_counter()
+        result = match(pattern, value)
+        elapsed = time.perf_counter() - start
+        self.assertFalse(result)  # the trailing literal `!` is absent
+        self.assertLess(elapsed, 1.0)
+
+
+class StarFollowedByQuantifier(unittest.TestCase):
+    # A `+`/`?` right after a `*` used to compile to a possessive
+    # `[^/]*+`/lazy-but-fine `[^/]*?`; the possessive form could never match
+    # anything. A star absorbs a trailing quantifier and keeps behaving as a
+    # star.
+    def test_star_plus_behaves_like_star(self):
+        self.assertTrue(match("a*+b", "aaab"))
+        self.assertTrue(match("a*+b", "ab"))
+        self.assertTrue(match("a*+b", "aXb"))
+        self.assertFalse(match("a*+b", "a/b"))  # single star still stops at /
+
+    def test_star_question_behaves_like_star(self):
+        self.assertTrue(match("a*?b", "aaab"))
+        self.assertTrue(match("a*?b", "ab"))
+        self.assertFalse(match("a*?b", "a/b"))
+
+
 if __name__ == "__main__":
     unittest.main()

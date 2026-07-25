@@ -44,6 +44,22 @@ class Discover(unittest.TestCase):
         broken = next(w for w in workflows if w.path.endswith("broken.yml"))
         self.assertIsNotNone(broken.parse_error)
 
+    def test_bom_prefixed_workflow_parses(self):
+        # Windows editors emit a UTF-8 BOM. Opening with plain utf-8 leaves the
+        # BOM glued to the first key so `on:` reads as "\ufeffon" and the
+        # trigger vanishes (a false SKIP). GitHub parses BOM'd files fine.
+        root = make_repo({"README.md": "x"})
+        wf_dir = root / ".github" / "workflows"
+        wf_dir.mkdir(parents=True, exist_ok=True)
+        (wf_dir / "ci.yml").write_bytes(
+            b"\xef\xbb\xbfon: push\njobs:\n  b:\n    runs-on: u\n"
+        )
+        workflows = discover(str(root))
+        self.assertEqual(len(workflows), 1)
+        wf = workflows[0]
+        self.assertIsNone(wf.parse_error)
+        self.assertIn("push", wf.triggers)
+
     def test_results_are_sorted_by_filename(self):
         root = make_repo(
             {

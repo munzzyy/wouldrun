@@ -40,6 +40,11 @@ def parse_workflow(path: str, text: str) -> Workflow:
         doc = yamlmini.load(text)
     except yamlmini.YamlError as e:
         return Workflow.broken(path, e)
+    except RecursionError:
+        # The parser caps its own nesting and normally raises YamlError long
+        # before this, but a pathological file must never escape as a bare
+        # traceback that takes down every other workflow's report.
+        return Workflow.broken(path, "workflow nesting is too deep to parse")
 
     if not isinstance(doc, dict):
         return Workflow.broken(path, "top level of the workflow is not a mapping")

@@ -31,7 +31,11 @@ def discover(root: str) -> list:
             if size > MAX_FILE_BYTES:
                 out.append(Workflow.broken(rel, f"file exceeds {MAX_FILE_BYTES} byte cap"))
                 continue
-            with open(full, "r", encoding="utf-8") as fh:
+            # utf-8-sig strips a leading BOM (what Windows editors emit) and
+            # is a no-op on BOM-less files; without it the BOM glues to the
+            # first key so `on:` parses as a different string and the trigger
+            # vanishes.
+            with open(full, "r", encoding="utf-8-sig") as fh:
                 text = fh.read()
         except OSError as e:
             out.append(Workflow.broken(rel, f"could not read file: {e}"))
