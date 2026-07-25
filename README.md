@@ -195,6 +195,11 @@ the job runs. Pin to a commit SHA instead if you want that to stop moving.
 - `pull_request` / `pull_request_target`: `branches`/`branches-ignore` against the PR
   base, `paths`/`paths-ignore` against changed files, and `types` against an activity
   type you pass with `--type` (falling back to GitHub's default types when you don't).
+- `types` on every other typed event too (`issues`, `issue_comment`, `label`, `milestone`,
+  `release`, `discussion`, `discussion_comment`, `registry_package`, `watch`, `project`,
+  `project_card`, and the rest): a `--type` that the workflow's `types:` list leaves out is
+  reported as SKIPPED. These events fire on all of their activity types by default, so a
+  bare trigger with no `types:` matches any `--type` you pass.
 - GitHub's filter-pattern glob syntax: `*` (never crosses `/`), `**` (crosses `/`, and
   folds its adjoining `/` so `**/README.md` also matches a root-level `README.md`), `?`
   (zero or one of the character before it), `+` (one or more of the character or
@@ -220,9 +225,6 @@ the job runs. Pin to a commit SHA instead if you want that to stop moving.
 - It does not check a `schedule:` cron expression against a clock. It confirms the
   trigger exists and shows you the cron string; whether "now" matches it is out of
   scope.
-- It does not model `types:` filters for events other than `pull_request` and
-  `pull_request_target`. Other typed events (`issues`, `release`, and so on) are
-  reported as firing whenever the event name matches, with no type-level filtering.
 - It only reads a job's own `uses:` (the reusable-workflow call). It does not parse
   `steps:`, so step-level `uses:` (an action reference) and `if:` are invisible to it.
 - It resolves `workflow_call` only for same-repo local paths (`./.github/workflows/*`).

@@ -1,9 +1,10 @@
 """Decide, for one hypothetical event, which workflows fire and why.
 
 This module intentionally does not evaluate `if:` step/job conditions or
-GitHub's `${{ }}` expression language, does not check cron schedules against
-a real clock, and does not model `types:` filters for events other than
-`pull_request` / `pull_request_target`. Those are all documented as explicit
+GitHub's `${{ }}` expression language, and does not check cron schedules
+against a real clock. It does honor `types:` activity-type filters for every
+event that supports them (pull_request, issues, release, discussion, and the
+rest -- see `_TYPED_EVENTS`). Those limits are all documented as explicit
 limits in the README; getting them wrong quietly would be worse than not
 having them.
 """
@@ -22,6 +23,37 @@ _PR_DEFAULT_TYPES = {
     "pull_request": ["opened", "synchronize", "reopened"],
     "pull_request_target": ["opened", "synchronize", "reopened"],
 }
+
+# Events that accept an `on.<event>.types:` activity-type filter, per GitHub's
+# "Events that trigger workflows" docs. pull_request / pull_request_target are
+# handled separately (they also carry branches/paths filters and default to a
+# strict SUBSET of their activity types); every event listed here defaults to
+# firing on ALL of its activity types when `types:` is omitted, so a bare
+# trigger matches any activity, and an explicit `types:` list is the only way
+# to narrow it.
+_TYPED_EVENTS = frozenset(
+    {
+        "branch_protection_rule",
+        "check_run",
+        "check_suite",
+        "discussion",
+        "discussion_comment",
+        "issue_comment",
+        "issues",
+        "label",
+        "merge_group",
+        "milestone",
+        "project",
+        "project_card",
+        "project_column",
+        "pull_request_review",
+        "pull_request_review_comment",
+        "registry_package",
+        "release",
+        "watch",
+        "workflow_run",
+    }
+)
 
 
 @dataclass
@@ -96,6 +128,8 @@ def _evaluate_trigger(event_name, spec, event: Event):
         return _evaluate_push(spec, event)
     if event_name in _PR_DEFAULT_TYPES:
         return _evaluate_pull_request(event_name, spec, event)
+    if event_name in _TYPED_EVENTS:
+        return _evaluate_typed(event_name, spec, event)
     if event_name == "workflow_dispatch":
         return True, ["`workflow_dispatch` trigger present; manual runs are not filtered by ref or changed files"]
     if event_name == "schedule":
@@ -108,8 +142,8 @@ def _evaluate_trigger(event_name, spec, event: Event):
     if event_name == "workflow_call":
         return True, ["`workflow_call` trigger present; this workflow can be called as a reusable workflow"]
     return True, [
-        f"`{event_name}` trigger present; wouldrun does not model filters for this event beyond "
-        "push and pull_request, so this only confirms the trigger exists"
+        f"`{event_name}` trigger present; this event takes no `types:`/`branches:`/`paths:` "
+        "filters, so a matching trigger always fires"
     ]
 
 
@@ -220,6 +254,43 @@ def _evaluate_pull_request(event_name, spec, event: Event):
     if not ok:
         return False, reasons
 
+    return True, reasons
+
+
+def _evaluate_typed(event_name, spec, event: Event):
+    """Honor the `types:` activity-type filter for a typed event that carries
+    no ref/path filters (issues, release, label, discussion, watch, ...).
+
+    GitHub fires these on every one of the event's activity types unless the
+    workflow narrows the set with `types:`. So a bare trigger matches any
+    activity, an explicit `types:` list that omits the evaluated activity type
+    SKIPS, and one that includes it fires."""
+    spec = spec if isinstance(spec, dict) else {}
+    reasons = []
+
+    types = _as_filter_list(spec.get("types"))
+    if not types:
+        reasons.append(
+            f"no `types` filter; GitHub runs `{event_name}` on all of its activity "
+            "types by default, so any activity type matches"
+        )
+        return True, reasons
+
+    activity = event.activity_type
+    if activity is None:
+        # No --type was given, so there is no activity type to test against the
+        # filter. The trigger still fires for the listed types -- report that
+        # rather than guessing an activity and possibly SKIPping wrongly.
+        reasons.append(
+            f"`types: {types}` present but no activity type given (use --type) to "
+            "evaluate against; fires for any of those types"
+        )
+        return True, reasons
+
+    if activity not in types:
+        reasons.append(f"activity type `{activity}` is not in `types: {types}`")
+        return False, reasons
+    reasons.append(f"activity type `{activity}` matches `types: {types}`")
     return True, reasons
 
 

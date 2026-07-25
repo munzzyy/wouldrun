@@ -507,10 +507,79 @@ class WorkflowCallResolution(unittest.TestCase):
         self.assertTrue(any("no `workflow_call` trigger" in reason for reason in caller.reasons))
 
 
-class UnknownEventPassesThrough(unittest.TestCase):
-    def test_release_trigger_present_fires(self):
+class TypedEventTypesFilter(unittest.TestCase):
+    """`types:` is honored for every event that supports it, not just
+    pull_request. An activity type the workflow's `types:` list leaves out
+    must SKIP; an event with no `types:` fires on any activity type."""
+
+    def test_release_default_types_fires_for_any_activity(self):
+        # No `types:` -- GitHub runs `release` on all of its activity types by
+        # default, so a published (or any other) release fires.
         text = "on: release\njobs:\n  b:\n    runs-on: u\n"
-        r = _run(text, Event(name="release"))
+        self.assertTrue(_run(text, Event(name="release", activity_type="published")).fires)
+        self.assertTrue(_run(text, Event(name="release", activity_type="prereleased")).fires)
+
+    def test_release_explicit_type_matches(self):
+        text = "on:\n  release:\n    types: [published]\njobs:\n  b:\n    runs-on: u\n"
+        r = _run(text, Event(name="release", activity_type="published"))
+        self.assertTrue(r.fires)
+
+    def test_release_excluded_type_skips(self):
+        text = "on:\n  release:\n    types: [published]\njobs:\n  b:\n    runs-on: u\n"
+        r = _run(text, Event(name="release", activity_type="created"))
+        self.assertFalse(r.fires)
+        self.assertTrue(any("not in `types:" in reason for reason in r.reasons))
+
+    def test_issues_excluded_type_skips(self):
+        text = "on:\n  issues:\n    types: [opened, reopened]\njobs:\n  b:\n    runs-on: u\n"
+        self.assertTrue(_run(text, Event(name="issues", activity_type="opened")).fires)
+        self.assertFalse(_run(text, Event(name="issues", activity_type="closed")).fires)
+
+    def test_issue_comment_scalar_type_form(self):
+        # A scalar `types: created` means the same as `types: [created]`.
+        text = "on:\n  issue_comment:\n    types: created\njobs:\n  b:\n    runs-on: u\n"
+        self.assertTrue(_run(text, Event(name="issue_comment", activity_type="created")).fires)
+        self.assertFalse(_run(text, Event(name="issue_comment", activity_type="deleted")).fires)
+
+    def test_label_edited_only(self):
+        text = "on:\n  label:\n    types: [created]\njobs:\n  b:\n    runs-on: u\n"
+        self.assertTrue(_run(text, Event(name="label", activity_type="created")).fires)
+        self.assertFalse(_run(text, Event(name="label", activity_type="edited")).fires)
+
+    def test_discussion_type_filter(self):
+        text = "on:\n  discussion:\n    types: [created, answered]\njobs:\n  b:\n    runs-on: u\n"
+        self.assertTrue(_run(text, Event(name="discussion", activity_type="answered")).fires)
+        self.assertFalse(_run(text, Event(name="discussion", activity_type="labeled")).fires)
+
+    def test_watch_default_started(self):
+        text = "on: watch\njobs:\n  b:\n    runs-on: u\n"
+        self.assertTrue(_run(text, Event(name="watch", activity_type="started")).fires)
+
+    def test_registry_package_excluded_type_skips(self):
+        text = "on:\n  registry_package:\n    types: [published]\njobs:\n  b:\n    runs-on: u\n"
+        self.assertFalse(_run(text, Event(name="registry_package", activity_type="updated")).fires)
+
+    def test_no_activity_type_given_still_fires_with_filter(self):
+        # Without --type there is no activity to test against the filter, so
+        # the trigger is reported as firing rather than guessing and SKIPping.
+        text = "on:\n  issues:\n    types: [labeled]\njobs:\n  b:\n    runs-on: u\n"
+        r = _run(text, Event(name="issues"))
+        self.assertTrue(r.fires)
+
+    def test_pull_request_target_types_still_filtered(self):
+        # pull_request_target keeps its own handler (branches/paths + subset
+        # default types); make sure its `types:` filtering did not regress.
+        text = "on:\n  pull_request_target:\n    types: [labeled]\njobs:\n  b:\n    runs-on: u\n"
+        self.assertTrue(_run(text, Event(name="pull_request_target", activity_type="labeled")).fires)
+        self.assertFalse(_run(text, Event(name="pull_request_target", activity_type="opened")).fires)
+
+
+class UnknownEventPassesThrough(unittest.TestCase):
+    def test_create_trigger_present_fires(self):
+        # `create` takes no types/branches/paths filters, so a matching
+        # trigger always fires.
+        text = "on: create\njobs:\n  b:\n    runs-on: u\n"
+        r = _run(text, Event(name="create"))
         self.assertTrue(r.fires)
 
 
