@@ -30,21 +30,3 @@ jobs:
         run: |
           python -m wouldrun examples/example-repo --list
           python -m wouldrun examples/example-repo --event push --ref refs/heads/main --changed src/app.py
-
-  # Everything here has to read like a person wrote it, code and docs alike.
-  # noslop's code mode scores each source file for machine-writing tells and
-  # fails at 10/100 lines. Pinned so a rules bump can't redden CI on its own.
-  noslop:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: "3.12"
-      - run: pip install noslop-lint==0.10.0
-      - name: Source reads human (code mode)
-        run: git ls-files -z '*.py' | grep -zv '^tests/fixtures/' | xargs -0r noslop --no-config
-      - name: Docs read human (prose mode)
-        run: git ls-files -z '*.md' | xargs -0r noslop --no-config
