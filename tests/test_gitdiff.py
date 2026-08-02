@@ -80,6 +80,29 @@ class GitDiff(unittest.TestCase):
         changed = changed_files_from_diff("main", repo_root=str(root))
         self.assertIn("a.txt", changed)
 
+    def test_non_ascii_path_comes_back_decoded_not_c_quoted(self):
+        # git's default core.quotepath renders any non-ASCII byte as an octal
+        # escape inside literal double quotes, e.g. "src/caf\303\251.py". That
+        # string matches no filter pattern, so a workflow GitHub would run gets
+        # reported SKIPPED.
+        root = _make_git_repo()
+        (Path(root) / "src" / "café.py").write_text("x = 1\n", encoding="utf-8")
+        _git(root, "add", "-A")
+        changed = changed_files_from_diff("HEAD", repo_root=str(root))
+        self.assertIn("src/café.py", changed)
+        self.assertFalse([p for p in changed if p.startswith('"')])
+        self.assertFalse([p for p in changed if "\\" in p])
+
+    def test_path_containing_a_newline_stays_one_entry(self):
+        root = _make_git_repo()
+        try:
+            (Path(root) / "src" / "we\nird.py").write_text("x = 1\n", encoding="utf-8")
+        except OSError:  # pragma: no cover - Windows rejects newlines in names
+            self.skipTest("this filesystem does not allow a newline in a filename")
+        _git(root, "add", "-A")
+        changed = changed_files_from_diff("HEAD", repo_root=str(root))
+        self.assertIn("src/we\nird.py", changed)
+
     def test_invalid_base_raises_clear_error_not_traceback(self):
         root = _make_git_repo()
         with self.assertRaises(GitDiffError):
