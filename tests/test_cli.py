@@ -179,6 +179,110 @@ class RefResolution(unittest.TestCase):
         self.assertNotIn("no --ref given", out)
 
 
+class WorkflowSelector(unittest.TestCase):
+    """--exit-fires over every workflow in a repo is a constant 0, because
+    essentially every repo has one unfiltered trigger. --workflow narrows the
+    question to the workflow you actually care about."""
+
+    def _repo(self):
+        return make_repo(
+            {
+                ".github/workflows/ci.yml": "name: CI\non: push\njobs:\n  b:\n    runs-on: u\n",
+                ".github/workflows/e2e.yml": (
+                    "name: End to end\non:\n  push:\n    branches: [release/*]\n"
+                    "jobs:\n  b:\n    runs-on: u\n"
+                ),
+            }
+        )
+
+    def test_matches_the_workflow_name(self):
+        code, out, _ = _run([str(self._repo()), "--ref", "refs/heads/main", "--workflow", "End to end", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("End to end", out)
+        self.assertNotIn("CI", out)
+        self.assertIn("1 workflow(s)", out)
+
+    def test_matches_the_file_name(self):
+        code, out, _ = _run([str(self._repo()), "--ref", "refs/heads/main", "--workflow", "e2e.yml", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("End to end", out)
+
+    def test_matches_the_file_stem_case_insensitively(self):
+        code, out, _ = _run([str(self._repo()), "--ref", "refs/heads/main", "--workflow", "E2E", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("End to end", out)
+
+    def test_repeatable(self):
+        code, out, _ = _run(
+            [str(self._repo()), "--ref", "refs/heads/main", "--workflow", "ci.yml",
+             "--workflow", "e2e.yml", "--no-color"]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("2 workflow(s)", out)
+
+    def test_no_match_exits_two_and_says_so(self):
+        code, _, err = _run([str(self._repo()), "--ref", "refs/heads/main", "--workflow", "nope", "--no-color"])
+        self.assertEqual(code, 2)
+        self.assertIn("no workflow matches --workflow", err)
+
+    def test_no_match_exits_two_even_with_exit_fires(self):
+        # The dangerous reading of a typo: nothing left to evaluate, so
+        # --exit-fires would otherwise report a confident "nothing fires".
+        code, _, err = _run(
+            [str(self._repo()), "--ref", "refs/heads/main", "--workflow", "nope", "--exit-fires", "--no-color"]
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("no workflow matches", err)
+
+    def test_exit_fires_is_scoped_to_the_named_workflow(self):
+        root = self._repo()
+        # Unscoped, ci.yml fires on any push, so --exit-fires is always 0.
+        code, _, _ = _run([str(root), "--ref", "refs/heads/main", "--exit-fires", "--no-color"])
+        self.assertEqual(code, 0)
+        # Scoped to e2e, which is gated on release/*, the answer is a real no.
+        code, _, _ = _run(
+            [str(root), "--ref", "refs/heads/main", "--workflow", "e2e.yml", "--exit-fires", "--no-color"]
+        )
+        self.assertEqual(code, 1)
+        code, _, _ = _run(
+            [str(root), "--ref", "refs/heads/release/1", "--workflow", "e2e.yml", "--exit-fires", "--no-color"]
+        )
+        self.assertEqual(code, 0)
+
+    def test_filters_json_output_too(self):
+        code, out, _ = _run([str(self._repo()), "--ref", "refs/heads/main", "--workflow", "ci.yml", "--json"])
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        self.assertEqual([w["name"] for w in payload["workflows"]], ["CI"])
+
+    def test_narrows_list_mode(self):
+        code, out, _ = _run([str(self._repo()), "--list", "--workflow", "ci.yml", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("CI", out)
+        self.assertNotIn("End to end", out)
+
+    def test_a_reusable_workflow_still_resolves_through_a_caller_you_did_not_name(self):
+        # The filter runs after evaluation, so naming only the reusable
+        # workflow still shows it as reached by its caller.
+        root = make_repo(
+            {
+                ".github/workflows/release.yml": (
+                    "name: Release\non: push\njobs:\n"
+                    "  deploy:\n    uses: ./.github/workflows/reusable.yml\n"
+                ),
+                ".github/workflows/reusable.yml": (
+                    "on: workflow_call\njobs:\n  d:\n    runs-on: u\n"
+                ),
+            }
+        )
+        code, out, _ = _run(
+            [str(root), "--ref", "refs/heads/main", "--workflow", "reusable.yml", "--no-color"]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("FIRES", out)
+        self.assertIn("not matched directly, but reached anyway", out)
+
+
 class Errors(unittest.TestCase):
     def test_missing_target_directory(self):
         code, _, err = _run(["/no/such/path/xyz-wouldrun"])

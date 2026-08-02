@@ -150,6 +150,21 @@ install it from git at a commit you chose:
 fire, 1 if none would) instead of the default, which is always 0 so you can pipe the
 report into something else without tripping `set -e`.
 
+Across a whole repo that answer is almost always yes, since one unfiltered
+`push:` or `pull_request:` is enough. The question worth asking in CI is about one
+workflow: is the expensive end-to-end suite going to fire, so is it worth building
+the environment for it? `--workflow` asks that, and scopes `--exit-fires` to it:
+
+```yaml
+- run: |
+    pipx run --spec "git+https://github.com/munzzyy/wouldrun@<commit-sha>" \
+      wouldrun --diff "origin/${{ github.base_ref }}" --workflow e2e.yml --exit-fires
+```
+
+It matches a workflow's `name:`, its file name (`e2e.yml`), its stem (`e2e`), or its
+path, case-insensitively, and it's repeatable. A value that matches nothing exits 2
+rather than reporting that nothing fires.
+
 ### Output formats
 
 - default: plain-text report, one block per workflow

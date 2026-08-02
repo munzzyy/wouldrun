@@ -62,6 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="BASE",
         help="run `git diff --name-only BASE --` in the target repo to get changed files",
     )
+    p.add_argument(
+        "--workflow",
+        action="append",
+        dest="workflow_names",
+        metavar="NAME",
+        help="only report this workflow. Matches its `name:`, its file name "
+        "(ci.yml), or its path, case-insensitively. Repeatable, and it scopes "
+        "--exit-fires to the workflows you named",
+    )
     p.add_argument("--list", action="store_true", help="list workflows and their triggers; skip event evaluation")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
     p.add_argument("--no-color", action="store_true", help="disable ANSI color")
@@ -103,6 +112,46 @@ def _resolve_ref(args):
     return FALLBACK_REF, "default"
 
 
+def _workflow_keys(workflow) -> set:
+    """Every string a --workflow value is allowed to match, lowercased."""
+    path = workflow.path
+    basename = path.rsplit("/", 1)[-1]
+    keys = {path.lower(), basename.lower()}
+    if "." in basename:
+        keys.add(basename.rsplit(".", 1)[0].lower())
+    if workflow.name:
+        keys.add(workflow.name.lower())
+    return keys
+
+
+def _select_workflows(items, wanted, get_workflow=None):
+    """Return (kept items, names that matched nothing).
+
+    On the evaluation path this runs after evaluate_all, not before, so a
+    reusable workflow reached through a caller you did not name still resolves
+    and still shows up if you named the reusable one.
+    """
+    get_workflow = get_workflow or (lambda item: item)
+    normalized = [w.strip().lower() for w in wanted if w.strip()]
+    kept = []
+    matched = set()
+    for item in items:
+        keys = _workflow_keys(get_workflow(item))
+        hits = [w for w in normalized if w in keys]
+        if hits:
+            matched.update(hits)
+            kept.append(item)
+    return kept, [w for w in normalized if w not in matched]
+
+
+def _no_match_message(unmatched) -> str:
+    """A --workflow value that matches nothing has to fail loudly. Left alone
+    it would leave nothing to evaluate, print "0 would fire", and exit 1 under
+    --exit-fires as if the answer were a real no."""
+    names = ", ".join(repr(u) for u in unmatched)
+    return f"wouldrun: no workflow matches --workflow {names}"
+
+
 def _build_changed_files(args) -> list:
     if args.changed:
         return [f.strip() for f in args.changed.split(",") if f.strip()]
@@ -121,6 +170,12 @@ def main(argv=None) -> int:
         return 2
 
     workflows = discover(args.target)
+
+    if args.workflow_names and args.list:
+        workflows, unmatched = _select_workflows(workflows, args.workflow_names)
+        if unmatched:
+            print(_no_match_message(unmatched), file=sys.stderr)
+            return 2
 
     if args.list:
         print(render_list(workflows, as_json=args.json))
@@ -151,6 +206,14 @@ def main(argv=None) -> int:
         ref_source=ref_source,
     )
     results = evaluate_all(workflows, event)
+
+    if args.workflow_names:
+        results, unmatched = _select_workflows(
+            results, args.workflow_names, get_workflow=lambda r: r.workflow
+        )
+        if unmatched:
+            print(_no_match_message(unmatched), file=sys.stderr)
+            return 2
 
     if args.json:
         print(render_json(results, event))
