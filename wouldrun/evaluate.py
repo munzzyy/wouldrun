@@ -12,7 +12,7 @@ having them.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 
 from . import globmatch
 from .event import Event, classify_ref
@@ -274,23 +274,61 @@ def _evaluate_typed(event_name, spec, event: Event):
             f"no `types` filter; GitHub runs `{event_name}` on all of its activity "
             "types by default, so any activity type matches"
         )
-        return True, reasons
+    else:
+        activity = event.activity_type
+        if activity is None:
+            # No --type was given, so there is no activity type to test against
+            # the filter. The trigger still fires for the listed types -- report
+            # that rather than guessing an activity and possibly SKIPping wrongly.
+            reasons.append(
+                f"`types: {types}` present but no activity type given (use --type) to "
+                "evaluate against; fires for any of those types"
+            )
+        elif activity not in types:
+            reasons.append(f"activity type `{activity}` is not in `types: {types}`")
+            return False, reasons
+        else:
+            reasons.append(f"activity type `{activity}` matches `types: {types}`")
 
-    activity = event.activity_type
-    if activity is None:
-        # No --type was given, so there is no activity type to test against the
-        # filter. The trigger still fires for the listed types -- report that
-        # rather than guessing an activity and possibly SKIPping wrongly.
+    if event_name == "workflow_run":
+        return _evaluate_workflow_run_extras(spec, event, reasons)
+    return True, reasons
+
+
+def _evaluate_workflow_run_extras(spec, event: Event, reasons):
+    """Handle the two filters `on.workflow_run` carries beyond `types:`.
+
+    `branches`/`branches-ignore` filter on the branch of the run that finished,
+    which is the ref wouldrun is being asked about, so that one is a real check.
+    `workflows:` names which upstream workflow has to have completed, and a
+    static read of the repo cannot know that. Reading only `types:` and staying
+    silent about both of these reported FIRES for workflows GitHub would never
+    have started.
+    """
+    branches, branches_ignore = _resolve_pair(spec, "branches", "branches-ignore", reasons)
+    if branches or branches_ignore:
+        is_tag, short = classify_ref(event.ref)
+        if is_tag:
+            # A workflow_run branch filter has nothing to compare a tag against.
+            # Say so; guessing here would mean a SKIPPED nobody can check.
+            reasons.append(
+                f"`branches`/`branches-ignore` filters the finished run's branch and "
+                f"--ref is the tag `{short}`, so wouldrun did not evaluate it"
+            )
+        else:
+            ok, why = _match_glob_list(
+                short, branches, branches_ignore, "branches", "branches-ignore"
+            )
+            reasons.append(f"branch `{short}`: {why}")
+            if not ok:
+                return False, reasons
+
+    workflows = _as_filter_list(spec.get("workflows"))
+    if workflows:
         reasons.append(
-            f"`types: {types}` present but no activity type given (use --type) to "
-            "evaluate against; fires for any of those types"
+            f"`workflows: {workflows}` was not evaluated: wouldrun cannot tell which "
+            "upstream workflow finished, so this only fires if it was one of those"
         )
-        return True, reasons
-
-    if activity not in types:
-        reasons.append(f"activity type `{activity}` is not in `types: {types}`")
-        return False, reasons
-    reasons.append(f"activity type `{activity}` matches `types: {types}`")
     return True, reasons
 
 

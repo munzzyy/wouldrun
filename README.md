@@ -228,6 +228,8 @@ the job runs. Pin to a commit SHA instead if you want that to stop moving.
   `project_card`, and the rest): a `--type` that the workflow's `types:` list leaves out is
   reported as SKIPPED. These events fire on all of their activity types by default, so a
   bare trigger with no `types:` matches any `--type` you pass.
+- `workflow_run`: `types` plus the `branches`/`branches-ignore` filter on the branch
+  of the run that finished, checked against `--ref` the same way a push is.
 - GitHub's filter-pattern glob syntax: `*` (never crosses `/`), `**` (crosses `/`, and
   folds its adjoining `/` so `**/README.md` also matches a root-level `README.md`), `?`
   (zero or one of the character before it), `+` (one or more of the character or
@@ -258,6 +260,9 @@ the job runs. Pin to a commit SHA instead if you want that to stop moving.
   gated by `if: github.event_name == 'push'` is reported as part of the workflow's job
   list whenever the workflow fires, regardless of what the condition would actually
   decide at runtime.
+- It does not evaluate `on.workflow_run`'s `workflows:` list, because nothing in the
+  repo says which upstream workflow finished. The other `workflow_run` filters are
+  checked, and the report names the `workflows:` list it had to leave alone.
 - It does not check a `schedule:` cron expression against a clock. It confirms the
   trigger exists and shows you the cron string; whether "now" matches it is out of
   scope.
