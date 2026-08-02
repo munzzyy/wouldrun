@@ -254,7 +254,8 @@ the job runs. Pin to a commit SHA instead if you want that to stop moving.
   `v[12].[0-9]+.[0-9]+`, as a regression case.
 - `workflow_call`: if workflow A's job calls `./.github/workflows/b.yml` and A fires, B
   is reported as reached even if B has no trigger of its own that would have matched
-  this event. Chains resolve transitively with cycle protection.
+  this event. Chains resolve transitively with cycle protection. `$/.github/workflows/b.yml`,
+  the self-repository form GitHub added in July 2026, resolves to the same file.
 - The `on:` boolean-coercion trap: PyYAML's default loader resolves an unquoted `on`
   key to the Python boolean `True` under YAML 1.1 rules, so a workflow's trigger
   silently vanishes the moment you `yaml.safe_load` it. wouldrun doesn't use PyYAML
@@ -283,8 +284,9 @@ the job runs. Pin to a commit SHA instead if you want that to stop moving.
   scope.
 - It only reads a job's own `uses:` (the reusable-workflow call). It does not parse
   `steps:`, so step-level `uses:` (an action reference) and `if:` are invisible to it.
-- It resolves `workflow_call` only for same-repo local paths (`./.github/workflows/*`).
-  A call into another repo's reusable workflow is reported by name but not followed.
+- It resolves `workflow_call` only for same-repo paths, written either way:
+  `./.github/workflows/*` or the newer `$/.github/workflows/*`. A call into another
+  repo's reusable workflow is reported by name but not followed.
 - It is a static tool. It never pushes, opens a PR, or runs anything. Its only
   subprocesses are two read-only git commands, each with a fixed argument list:
   `git diff --name-only` for `--diff`, and `git symbolic-ref HEAD` for the `--ref`

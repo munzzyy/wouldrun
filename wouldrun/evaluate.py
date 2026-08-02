@@ -474,15 +474,23 @@ def _resolve_workflow_calls(workflows, by_path, results):
     return called
 
 
+# Both prefixes mean "a workflow in this same repository". `./` is the original
+# form and resolves against the checked-out tree; `$/` went GA on 2026-07-30 and
+# resolves against the repository at the commit the run is on, no checkout
+# needed. Same target either way, so wouldrun follows both.
+_SAME_REPO_USES_PREFIXES = ("./", "$/")
+
+
 def _resolve_local_uses(uses):
     """Normalize a job's `uses:` to a repo-relative path, or None if it is
     not a same-repo reusable-workflow reference (an action, or an external
     repo's workflow)."""
     if not uses or not isinstance(uses, str):
         return None
-    if not uses.startswith("./"):
+    prefix = next((p for p in _SAME_REPO_USES_PREFIXES if uses.startswith(p)), None)
+    if prefix is None:
         return None
-    path = uses[2:]
+    path = uses[len(prefix) :]
     parts = [p for p in path.split("/") if p not in ("", ".")]
     normalized = []
     for part in parts:

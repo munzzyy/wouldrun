@@ -507,6 +507,90 @@ class WorkflowCallResolution(unittest.TestCase):
         self.assertTrue(any("no `workflow_call` trigger" in reason for reason in caller.reasons))
 
 
+class SelfRepositoryUsesSyntax(unittest.TestCase):
+    """`$/path` in `uses:` means the same repository at the running commit.
+    It went GA on 2026-07-30 and is the same target `./path` names, so a
+    workflow_call written that way has to resolve the same way."""
+
+    def _repo(self, uses):
+        return make_repo(
+            {
+                ".github/workflows/caller.yml": (
+                    "on:\n  push:\n    branches: [main]\n"
+                    "jobs:\n  call:\n    uses: " + uses + "\n"
+                ),
+                ".github/workflows/reused.yml": (
+                    "on:\n  workflow_call:\njobs:\n  build:\n    runs-on: u\n"
+                ),
+            }
+        )
+
+    def _fired(self, uses):
+        workflows = discover(str(self._repo(uses)))
+        results = evaluate_all(workflows, Event(name="push", ref="refs/heads/main"))
+        return {r.workflow.path for r in results if r.fires}
+
+    def test_dollar_slash_resolves_like_dot_slash(self):
+        self.assertEqual(
+            self._fired("$/.github/workflows/reused.yml"),
+            self._fired("./.github/workflows/reused.yml"),
+        )
+
+    def test_dollar_slash_reaches_the_called_workflow(self):
+        self.assertIn(".github/workflows/reused.yml", self._fired("$/.github/workflows/reused.yml"))
+
+    def test_an_external_repo_reference_is_still_not_followed(self):
+        fired = self._fired("other/repo/.github/workflows/reused.yml@main")
+        self.assertNotIn(".github/workflows/reused.yml", fired)
+
+
+class NewStepKeysParse(unittest.TestCase):
+    """GitHub added background/wait/wait-all/cancel steps and parallel step
+    groups on 2026-06-25. wouldrun does not read steps, but it does have to
+    keep parsing a file that uses them instead of failing the whole workflow
+    and reporting a parse error where a verdict belongs."""
+
+    TEXT = (
+        "name: Parallel\n"
+        "on:\n  push:\n    branches: [main]\n"
+        "jobs:\n"
+        "  build:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - id: server\n"
+        "        run: ./serve.sh\n"
+        "        background: true\n"
+        "      - run: ./migrate.sh\n"
+        "        id: migrate\n"
+        "      - parallel:\n"
+        "          - run: ./lint.sh\n"
+        "          - run: ./typecheck.sh\n"
+        "      - wait: migrate\n"
+        "      - wait-all: true\n"
+        "      - cancel: server\n"
+        "  check:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: echo ok\n"
+    )
+
+    def test_workflow_still_parses(self):
+        wf = parse_workflow(".github/workflows/x.yml", self.TEXT)
+        self.assertIsNone(wf.parse_error)
+        self.assertEqual(wf.name, "Parallel")
+
+    def test_jobs_and_triggers_survive(self):
+        wf = parse_workflow(".github/workflows/x.yml", self.TEXT)
+        self.assertEqual(sorted(wf.jobs), ["build", "check"])
+        self.assertIn("push", wf.triggers)
+
+    def test_it_still_gets_a_verdict(self):
+        r = _run(self.TEXT, Event(name="push", ref="refs/heads/main"))
+        self.assertTrue(r.fires)
+        self.assertEqual(r.jobs, ["build", "check"])
+        self.assertFalse(_run(self.TEXT, Event(name="push", ref="refs/heads/dev")).fires)
+
+
 class TypedEventTypesFilter(unittest.TestCase):
     """`types:` is honored for every event that supports it, not just
     pull_request. An activity type the workflow's `types:` list leaves out
