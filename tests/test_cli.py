@@ -198,6 +198,29 @@ class Errors(unittest.TestCase):
         code, _, err = _run([str(root), "--changed-from", "/no/such/file-xyz"])
         self.assertEqual(code, 2)
 
+    def test_changed_from_non_utf8_file_reports_cleanly(self):
+        # A list written by a Windows editor or a PowerShell redirect is
+        # cp1252, not UTF-8. UnicodeDecodeError is a ValueError, not an
+        # OSError, so it used to sail past the handler as a raw traceback.
+        root = workflow_repo("ci.yml", "on: push\njobs:\n  b:\n    runs-on: u\n")
+        listfile = Path(tempfile.mkdtemp()) / "cp1252.txt"
+        listfile.write_bytes(b"src/caf\xe9.py\n")
+        code, out, err = _run([str(root), "--changed-from", str(listfile)])
+        self.assertEqual(code, 2)
+        self.assertIn("could not read changed files", err)
+        self.assertNotIn("Traceback", err)
+        self.assertNotIn("FIRES", out)
+
+    def test_changed_from_file_with_a_bom_does_not_glue_it_to_the_first_path(self):
+        root = workflow_repo(
+            "ci.yml", "on:\n  push:\n    paths: ['src/**']\njobs:\n  b:\n    runs-on: u\n"
+        )
+        listfile = Path(tempfile.mkdtemp()) / "bom.txt"
+        listfile.write_bytes(b"\xef\xbb\xbfsrc/app.py\n")
+        code, out, _ = _run([str(root), "--ref", "refs/heads/main", "--changed-from", str(listfile), "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("FIRES", out)
+
 
 class MalformedWorkflowGlob(unittest.TestCase):
     def test_bad_char_range_degrades_gracefully_other_workflows_still_resolve(self):

@@ -78,7 +78,10 @@ def _read_changed_from(path: str) -> list:
     if path == "-":
         text = sys.stdin.read()
     else:
-        with open(path, "r", encoding="utf-8") as fh:
+        # utf-8-sig, matching discover.py: a list written by a Windows editor
+        # starts with a BOM, and plain utf-8 glues it onto the first path so
+        # that path quietly matches nothing.
+        with open(path, "r", encoding="utf-8-sig") as fh:
             text = fh.read()
     return [line.strip() for line in text.splitlines() if line.strip()]
 
@@ -129,6 +132,12 @@ def main(argv=None) -> int:
         print(f"wouldrun: {e}", file=sys.stderr)
         return 2
     except OSError as e:
+        print(f"wouldrun: could not read changed files: {e}", file=sys.stderr)
+        return 2
+    except UnicodeDecodeError as e:
+        # UnicodeDecodeError is a ValueError, not an OSError, so a cp1252 list
+        # from a PowerShell redirect used to escape the handler above as a raw
+        # traceback.
         print(f"wouldrun: could not read changed files: {e}", file=sys.stderr)
         return 2
 
