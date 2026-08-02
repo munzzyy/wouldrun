@@ -192,7 +192,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: munzzyy/wouldrun@main
+      - uses: munzzyy/wouldrun@v0.1.0
 ```
 
 Posting that same table as a PR comment is opt-in, `post-comment: "true"`, and
@@ -209,7 +209,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: munzzyy/wouldrun@main
+      - uses: munzzyy/wouldrun@v0.1.0
         with:
           post-comment: "true"
 ```
@@ -222,8 +222,8 @@ comment path finds and updates a single existing comment (by a hidden
 each time, so a PR carries at most one wouldrun comment no matter how many
 times it's pushed to.
 
-No tagged release exists yet, so `@main` above tracks whatever's on `main` when
-the job runs. Pin to a commit SHA instead if you want that to stop moving.
+The `@v0.1.0` pin above is the current tagged release. Pin to a commit SHA
+instead if you want even tags to stop moving.
 
 ## What it checks
 
