@@ -8,10 +8,12 @@ import sys
 
 from . import __version__
 from .discover import discover
-from .event import Event
+from .event import REF_EVENTS, Event
 from .evaluate import evaluate_all
-from .gitdiff import GitDiffError, changed_files_from_diff
+from .gitdiff import GitDiffError, changed_files_from_diff, current_ref
 from .report import render_human, render_json, render_list
+
+FALLBACK_REF = "refs/heads/main"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,9 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--ref",
-        default="refs/heads/main",
+        default=None,
         help="ref for a push event: a branch (main), a full ref "
-        "(refs/heads/main, refs/tags/v1.0.0); default: refs/heads/main",
+        "(refs/heads/main, refs/tags/v1.0.0); default: the branch checked out "
+        "in the target repo, or refs/heads/main if that cannot be read",
     )
     p.add_argument(
         "--base",
@@ -80,6 +83,23 @@ def _read_changed_from(path: str) -> list:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
+def _resolve_ref(args):
+    """Return (ref, source) for the event under evaluation.
+
+    A hardcoded refs/heads/main default answered for the wrong branch every
+    time someone ran wouldrun from a feature branch, which is the most likely
+    first run there is. Read the branch out of the target repo instead, and
+    only fall back to main when there is nothing to read.
+    """
+    if args.ref is not None:
+        return args.ref, "flag"
+    if args.event in REF_EVENTS:
+        ref = current_ref(args.target)
+        if ref:
+            return ref, "git"
+    return FALLBACK_REF, "default"
+
+
 def _build_changed_files(args) -> list:
     if args.changed:
         return [f.strip() for f in args.changed.split(",") if f.strip()]
@@ -112,12 +132,14 @@ def main(argv=None) -> int:
         print(f"wouldrun: could not read changed files: {e}", file=sys.stderr)
         return 2
 
+    ref, ref_source = _resolve_ref(args)
     event = Event(
         name=args.event,
-        ref=args.ref,
+        ref=ref,
         base_ref=args.base_ref,
         changed_files=changed_files,
         activity_type=args.activity_type,
+        ref_source=ref_source,
     )
     results = evaluate_all(workflows, event)
 

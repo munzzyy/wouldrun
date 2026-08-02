@@ -6,6 +6,12 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 
+# Events whose verdict turns on `ref`. Everything else either filters on a base
+# branch (pull_request), or ignores the ref entirely, so there is no point
+# reading a branch out of git for them and no point explaining the one we used.
+REF_EVENTS = frozenset({"push", "workflow_run"})
+
+
 @dataclass
 class Event:
     name: str
@@ -13,6 +19,10 @@ class Event:
     base_ref: Optional[str] = None  # pull_request: base branch, e.g. "main"
     changed_files: List[str] = field(default_factory=list)
     activity_type: Optional[str] = None  # pull_request: opened, synchronize, ...
+    # Where `ref` came from: "flag" (the user passed --ref), "git" (read from
+    # the target repo's HEAD), or "default" (nothing to read it from, so it was
+    # assumed). A wrong ref flips every branch filter, so the report says which.
+    ref_source: str = "flag"
 
 
 def classify_ref(ref: Optional[str]):

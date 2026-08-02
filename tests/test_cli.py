@@ -3,6 +3,8 @@
 import contextlib
 import io
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,6 +12,18 @@ from pathlib import Path
 
 from wouldrun import cli
 from tests._helpers import make_repo, workflow_repo
+
+_HAVE_GIT = shutil.which("git") is not None
+
+
+def _git(root, *args):
+    subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
 
 
 def _run(argv):
@@ -111,6 +125,58 @@ class EventMode(unittest.TestCase):
         root = workflow_repo("ci.yml", "on: workflow_dispatch\njobs:\n  b:\n    runs-on: u\n")
         code, _, _ = _run([str(root), "--event", "push", "--ref", "refs/heads/main", "--no-color"])
         self.assertEqual(code, 0)
+
+
+class RefResolution(unittest.TestCase):
+    """--ref used to be a hardcoded refs/heads/main, so running wouldrun on a
+    feature branch answered for main and said `branch main` while doing it."""
+
+    def _repo_on_branch(self, branch):
+        if not _HAVE_GIT:
+            self.skipTest("git not available")
+        root = workflow_repo(
+            "ci.yml", "on:\n  push:\n    branches: [main]\njobs:\n  b:\n    runs-on: u\n"
+        )
+        _git(root, "init", "-q", "-b", branch)
+        return root
+
+    def test_explicit_ref_wins_and_is_not_annotated(self):
+        root = self._repo_on_branch("feature/x")
+        code, out, _ = _run([str(root), "--ref", "refs/heads/main", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("FIRES", out)
+        self.assertNotIn("no --ref given", out)
+
+    def test_ref_comes_from_the_checked_out_branch(self):
+        root = self._repo_on_branch("feature/x")
+        code, out, _ = _run([str(root), "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("SKIPPED", out)
+        self.assertIn("branch `feature/x`", out)
+        self.assertIn("using the checked-out branch `refs/heads/feature/x`", out)
+
+    def test_ref_falls_back_to_main_outside_a_git_repo(self):
+        root = workflow_repo(
+            "ci.yml", "on:\n  push:\n    branches: [main]\njobs:\n  b:\n    runs-on: u\n"
+        )
+        code, out, _ = _run([str(root), "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("FIRES", out)
+        self.assertIn("assuming `refs/heads/main`", out)
+
+    def test_json_reports_where_the_ref_came_from(self):
+        root = self._repo_on_branch("feature/x")
+        code, out, _ = _run([str(root), "--json"])
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["event"]["ref"], "refs/heads/feature/x")
+        self.assertEqual(payload["event"]["ref_source"], "git")
+
+    def test_events_that_ignore_the_ref_get_no_note(self):
+        root = self._repo_on_branch("feature/x")
+        code, out, _ = _run([str(root), "--event", "pull_request", "--base", "main", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertNotIn("no --ref given", out)
 
 
 class Errors(unittest.TestCase):

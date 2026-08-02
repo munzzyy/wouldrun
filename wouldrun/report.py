@@ -5,10 +5,26 @@ from __future__ import annotations
 import json
 
 from . import __version__
+from .event import REF_EVENTS
 
 _GREEN = "\033[32m"
 _GRAY = "\033[90m"
 _RESET = "\033[0m"
+
+
+def ref_note(event):
+    """One line saying where a ref nobody typed came from, or None.
+
+    Every branch and tag filter turns on this value, so a ref wouldrun picked
+    for you has to be visible in the report. A ref the user passed needs no
+    explanation, and neither does an event that ignores the ref entirely.
+    """
+    source = getattr(event, "ref_source", "flag")
+    if source == "flag" or event.name not in REF_EVENTS:
+        return None
+    if source == "git":
+        return f"no --ref given; using the checked-out branch `{event.ref}`"
+    return f"no --ref given and no branch to read from git; assuming `{event.ref}`"
 
 
 def render_human(results, event, color: bool = True) -> str:
@@ -18,6 +34,9 @@ def render_human(results, event, color: bool = True) -> str:
     lines = [""]
     fired = sum(1 for r in results if r.fires)
     lines.append(f"  wouldrun  event={event.name}  {len(results)} workflow(s), {fired} would fire")
+    note = ref_note(event)
+    if note:
+        lines.append(f"  {note}")
     lines.append("")
 
     if not results:
@@ -45,6 +64,7 @@ def render_json(results, event) -> str:
         "event": {
             "name": event.name,
             "ref": event.ref,
+            "ref_source": getattr(event, "ref_source", "flag"),
             "base_ref": event.base_ref,
             "activity_type": event.activity_type,
             "changed_files": event.changed_files,

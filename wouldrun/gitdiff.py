@@ -1,6 +1,7 @@
-"""A narrow, safe wrapper around `git diff --name-only` for --diff BASE.
+"""Narrow, safe wrappers around the two `git` reads wouldrun needs.
 
-It builds a fixed argv list, never a shell string, and runs git with
+`changed_files_from_diff` backs `--diff BASE`; `current_ref` backs the `--ref`
+default. Both build a fixed argv list, never a shell string, and both run with
 `core.quotepath=false` so git hands back real path bytes instead of its
 C-escaped rendering of them.
 """
@@ -44,6 +45,25 @@ def changed_files_from_diff(base: str, repo_root: str = ".") -> list:
         raise GitDiffError(f"git diff failed: {proc.stderr.strip() or proc.returncode}")
 
     return [path for path in proc.stdout.split("\0") if path.strip()]
+
+
+def current_ref(repo_root: str = ".") -> str:
+    """Return the checked-out branch as a full ref, or "" if there isn't one.
+
+    Empty means: not a git work tree, HEAD is detached, or git is missing. The
+    caller decides what to assume in that case -- this function will not guess
+    a branch, because guessing is what made `--ref` wrong in the first place.
+    """
+    if not os.path.isdir(repo_root):
+        return ""
+    try:
+        proc = _run_git(_git_argv(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD"))
+    except GitDiffError:
+        return ""
+    if proc.returncode != 0:
+        return ""
+    branch = proc.stdout.strip()
+    return "refs/heads/" + branch if branch else ""
 
 
 def _merge_base(base: str, repo_root: str) -> str:

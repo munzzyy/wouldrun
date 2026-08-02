@@ -94,6 +94,22 @@ $ wouldrun examples/example-repo --event push --ref refs/tags/v1.2.3
            jobs: deploy
 ```
 
+### Which branch it assumes
+
+Leave `--ref` off and wouldrun uses the branch checked out in the target repo,
+and says so in the report header:
+
+```
+$ wouldrun
+
+  wouldrun  event=push  2 workflow(s), 0 would fire
+  no --ref given; using the checked-out branch `refs/heads/feature/x`
+```
+
+If there's no branch to read (not a git repo, detached HEAD, no git on PATH) it
+falls back to `refs/heads/main` and says that instead. `--json` carries the same
+information as `event.ref_source`: `flag`, `git`, or `default`.
+
 ### Feeding it changed files
 
 ```bash

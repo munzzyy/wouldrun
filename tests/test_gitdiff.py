@@ -5,7 +5,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from wouldrun.gitdiff import GitDiffError, changed_files_from_diff
+from wouldrun.gitdiff import GitDiffError, changed_files_from_diff, current_ref
 from tests._helpers import make_repo
 
 _HAVE_GIT = shutil.which("git") is not None
@@ -120,6 +120,33 @@ class GitDiff(unittest.TestCase):
     def test_missing_repo_root_is_rejected(self):
         with self.assertRaises(GitDiffError):
             changed_files_from_diff("HEAD", repo_root="/no/such/directory/xyz")
+
+
+@unittest.skipUnless(_HAVE_GIT, "git not available")
+class CurrentRef(unittest.TestCase):
+    def test_reads_the_checked_out_branch(self):
+        root = _make_git_repo()
+        _git(root, "checkout", "-q", "-b", "feature/x")
+        self.assertEqual(current_ref(str(root)), "refs/heads/feature/x")
+
+    def test_detached_head_returns_empty(self):
+        root = _make_git_repo()
+        head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout.strip()
+        _git(root, "checkout", "-q", head)
+        self.assertEqual(current_ref(str(root)), "")
+
+    def test_not_a_git_repo_returns_empty(self):
+        root = make_repo({"README.md": "hi"})
+        self.assertEqual(current_ref(str(root)), "")
+
+    def test_missing_directory_returns_empty(self):
+        self.assertEqual(current_ref("/no/such/directory/xyz"), "")
 
 
 if __name__ == "__main__":
