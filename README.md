@@ -15,16 +15,23 @@ no `act`, no container.
 
 ## Install
 
-Pure standard library, Python 3.9+, no runtime dependencies. Clone it and it runs:
+Pure standard library, Python 3.9+, no runtime dependencies.
+
+```bash
+pipx install git+https://github.com/munzzyy/wouldrun
+```
+
+Or clone it and run it in place, no install step at all:
 
 ```bash
 git clone https://github.com/munzzyy/wouldrun
 cd wouldrun
-python -m wouldrun --list      # run it directly, no install
+python -m wouldrun --list      # run it directly
 pip install -e .               # or install the `wouldrun` command
 ```
 
-Once it's on PyPI: `pipx install wouldrun`.
+wouldrun is not published on PyPI, so `pip install wouldrun` does not get you
+this project. Install it from git.
 
 ## Usage
 
@@ -130,8 +137,13 @@ wouldrun --event schedule
 
 ### In CI
 
+The composite Action further down is the shortest path. To run the CLI yourself,
+install it from git at a commit you chose:
+
 ```yaml
-- run: pipx run wouldrun --diff "origin/${{ github.base_ref }}" --exit-fires
+- run: |
+    pipx run --spec "git+https://github.com/munzzyy/wouldrun@<commit-sha>" \
+      wouldrun --diff "origin/${{ github.base_ref }}" --exit-fires
 ```
 
 `--exit-fires` makes the exit code reflect the verdict (0 if at least one workflow would
@@ -140,9 +152,9 @@ report into something else without tripping `set -e`.
 
 ### Output formats
 
-- default — plain-text report, one block per workflow
-- `--json` — the same verdicts and reasons, machine-readable
-- `--list` — just workflow names and triggers, no event needed
+- default: plain-text report, one block per workflow
+- `--json`: the same verdicts and reasons, machine-readable
+- `--list`: just workflow names and triggers, no event needed
 
 Full flag reference: `wouldrun --help`.
 
@@ -152,7 +164,7 @@ Full flag reference: `wouldrun --help`.
 own pull requests: it checks out the PR, runs wouldrun against the PR's base and
 changed files, and reports the FIRES/SKIPPED table.
 
-By default that report only goes to the job summary — nothing posted anywhere,
+By default that report only goes to the job summary, nothing posted anywhere,
 no permission beyond the default `contents: read`:
 
 ```yaml
@@ -228,12 +240,20 @@ the job runs. Pin to a commit SHA instead if you want that to stop moving.
   this event. Chains resolve transitively with cycle protection.
 - The `on:` boolean-coercion trap: PyYAML's default loader resolves an unquoted `on`
   key to the Python boolean `True` under YAML 1.1 rules, so a workflow's trigger
-  silently vanishes the moment you `yaml.safe_load` it. wouldrun doesn't use PyYAML —
-  see "How it works" below — and `tests/test_workflow.py` exercises the fallback guard
+  silently vanishes the moment you `yaml.safe_load` it. wouldrun doesn't use PyYAML
+  (see "How it works" below), and `tests/test_workflow.py` exercises the fallback guard
   directly in case that ever changes.
 
 ## What it does not do
 
+- FIRES means the trigger matches, not that the run starts. GitHub decides that
+  second part on the server, after the match, and several things can veto it:
+  workflow-execution rulesets that allowlist which actors and events may trigger
+  a workflow, the approval hold GitHub puts on runs it flags as potentially
+  malicious, the approval gate on pull requests opened by bots, a workflow
+  disabled in the Actions tab, and org or repo Actions policy. None of that is in
+  the workflow file, so no static reader can see it. Read FIRES as "nothing in the
+  YAML stops this".
 - It does not evaluate `if:` conditions or GitHub's `${{ }}` expression language. A job
   gated by `if: github.event_name == 'push'` is reported as part of the workflow's job
   list whenever the workflow fires, regardless of what the condition would actually
@@ -245,24 +265,29 @@ the job runs. Pin to a commit SHA instead if you want that to stop moving.
   `steps:`, so step-level `uses:` (an action reference) and `if:` are invisible to it.
 - It resolves `workflow_call` only for same-repo local paths (`./.github/workflows/*`).
   A call into another repo's reusable workflow is reported by name but not followed.
-- It is a static tool. It never pushes, opens a PR, or runs anything — `--diff` only
-  runs `git diff --name-only` with a fixed argument list, read-only.
+- It is a static tool. It never pushes, opens a PR, or runs anything. Its only
+  subprocesses are two read-only git commands, each with a fixed argument list:
+  `git diff --name-only` for `--diff`, and `git symbolic-ref HEAD` for the `--ref`
+  default.
 
 ## How it works
 
 wouldrun does not use PyYAML. `wouldrun/yamlmini.py` is a small, from-scratch reader
-for the subset of YAML that workflow files use — block and flow mappings/sequences,
-quoted and plain scalars, `|`/`>` block scalars, comments — with one deliberate
+for the subset of YAML that workflow files use (block and flow mappings/sequences,
+quoted and plain scalars, `|`/`>` block scalars, comments) with one deliberate
 difference from PyYAML's default behavior: it resolves booleans the way YAML 1.2's core
 schema does (only `true`/`false`), not YAML 1.1's (which also turns `on`, `off`, `yes`,
 and `no` into booleans). That difference is the entire reason this project doesn't take
 a YAML dependency: the field this tool cares about most, `on:`, is exactly the field
-PyYAML's default loader gets wrong. `wouldrun/globmatch.py` translates GitHub's
-filter-pattern glob syntax into a Python regex and matches the whole ref or path
-against it. `wouldrun/evaluate.py` is the trigger-matching engine described above.
-Nothing here calls a model, makes a network request, or writes anything; `--diff` is
-the one place it shells out, and it does so with a fixed `argv` list, never a shell
-string.
+PyYAML's default loader gets wrong. `wouldrun/globmatch.py` matches GitHub's
+filter-pattern glob syntax with a linear reach-set sweep over a compiled token list,
+not a translated regex: a regex where every `*` becomes `[^/]*` is ambiguous enough
+that a pattern a workflow file is allowed to contain sends Python's engine into
+catastrophic backtracking. `wouldrun/evaluate.py` is the trigger-matching engine
+described above. Nothing here calls a model, makes a network request, or writes
+anything. It shells out in exactly two places, both a fixed `argv` list and never a
+shell string: `git diff --name-only` for `--diff`, and `git symbolic-ref HEAD` to
+read the current branch when you don't pass `--ref`.
 
 ## Contributing
 
@@ -273,7 +298,7 @@ fixed; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT — free to use, change, and ship, commercial or not. See [LICENSE](LICENSE).
+MIT. Free to use, change, and ship, commercial or not. See [LICENSE](LICENSE).
 
 ## Support
 

@@ -47,7 +47,7 @@ def format_markdown(payload: dict) -> str:
 
     lines = [
         MARKER,
-        f"**wouldrun** — event `{event.get('name', '?')}`, "
+        f"**wouldrun**: event `{event.get('name', '?')}`, "
         f"{len(workflows)} workflow(s), {fired} would fire",
         "",
     ]

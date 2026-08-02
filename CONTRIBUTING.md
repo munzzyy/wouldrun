@@ -19,7 +19,7 @@ python -m unittest discover -s tests -t .
 
 That's the whole suite: the YAML reader, the glob translator, workflow parsing, the
 trigger-matching engine, discovery, `git diff`, and the CLI. CI runs the same command
-across Linux, macOS, and Windows on Python 3.9 through 3.13.
+across Linux, macOS, and Windows on Python 3.9, 3.11, 3.12, and 3.13.
 
 ## Fixing a filter bug
 
@@ -28,12 +28,12 @@ The matching engine (`wouldrun/evaluate.py`) and the glob translator
 wouldrun's FIRES/SKIPPED verdict disagrees with what GitHub actually does, land the fix
 with a test in `tests/test_evaluate.py` or `tests/test_globmatch.py` that fails before
 the fix and passes after. Say where you confirmed the real behavior (a GitHub Actions
-run log, the docs, a reproduction) in the PR description — this project would rather
+run log, the docs, a reproduction) in the PR description. This project would rather
 cite a source than guess at GitHub's undocumented corners.
 
 ## Zero dependencies
 
-wouldrun has no runtime dependencies and that's a feature, not an oversight — see the
+wouldrun has no runtime dependencies and that's a feature, not an oversight. See the
 README's "How it works" section for why a generic YAML library specifically was the
 wrong call here. If a change needs one, that's a reason to reconsider the change.
 
