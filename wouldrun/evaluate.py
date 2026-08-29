@@ -4,9 +4,10 @@ This module intentionally does not evaluate `if:` step/job conditions or
 GitHub's `${{ }}` expression language, and does not check cron schedules
 against a real clock. It does honor `types:` activity-type filters for every
 event that supports them (pull_request, issues, release, discussion, and the
-rest -- see `_TYPED_EVENTS`). Those limits are all documented as explicit
-limits in the README; getting them wrong quietly would be worse than not
-having them.
+rest -- see `_TYPED_EVENTS`), and it honors `workflow_run`'s `workflows:` name
+list against `--triggering-workflow` when given. Those limits are all
+documented as explicit limits in the README; getting them wrong quietly would
+be worse than not having them.
 """
 
 from __future__ import annotations
@@ -298,13 +299,39 @@ def _evaluate_typed(event_name, spec, event: Event):
 def _evaluate_workflow_run_extras(spec, event: Event, reasons):
     """Handle the two filters `on.workflow_run` carries beyond `types:`.
 
+    `workflows:` names which upstream workflow has to have completed, and in
+    practice GitHub requires it: a `workflow_run` trigger with no `workflows:`
+    list never runs at all. wouldrun cannot know which workflow actually
+    finished on its own, so it takes that name from `--triggering-workflow` and
+    checks it the same way any other filter list is checked -- treating an
+    unevaluated `workflows:` as "matches anyway" reported FIRES for workflows
+    GitHub would never have started.
+
     `branches`/`branches-ignore` filter on the branch of the run that finished,
-    which is the ref wouldrun is being asked about, so that one is a real check.
-    `workflows:` names which upstream workflow has to have completed, and a
-    static read of the repo cannot know that. Reading only `types:` and staying
-    silent about both of these reported FIRES for workflows GitHub would never
-    have started.
+    which is the ref wouldrun is being asked about, so that one is a real check
+    against `--ref`.
     """
+    workflows = _as_filter_list(spec.get("workflows"))
+    if not workflows:
+        reasons.append(
+            "no `workflows:` list; GitHub requires `on.workflow_run.workflows` to name "
+            "the workflow(s) whose completion triggers this one, and without it this "
+            "trigger never runs"
+        )
+        return False, reasons
+
+    triggering = event.triggering_workflow
+    if triggering is None:
+        reasons.append(
+            f"`workflows: {workflows}` present but no `--triggering-workflow` given to "
+            "check against it, so wouldrun cannot confirm this fires"
+        )
+        return False, reasons
+    if triggering not in workflows:
+        reasons.append(f"triggering workflow `{triggering}` is not in `workflows: {workflows}`")
+        return False, reasons
+    reasons.append(f"triggering workflow `{triggering}` matches `workflows: {workflows}`")
+
     branches, branches_ignore = _resolve_pair(spec, "branches", "branches-ignore", reasons)
     if branches or branches_ignore:
         is_tag, short = classify_ref(event.ref)
@@ -323,12 +350,6 @@ def _evaluate_workflow_run_extras(spec, event: Event, reasons):
             if not ok:
                 return False, reasons
 
-    workflows = _as_filter_list(spec.get("workflows"))
-    if workflows:
-        reasons.append(
-            f"`workflows: {workflows}` was not evaluated: wouldrun cannot tell which "
-            "upstream workflow finished, so this only fires if it was one of those"
-        )
     return True, reasons
 
 

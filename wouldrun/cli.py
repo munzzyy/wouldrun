@@ -11,6 +11,7 @@ from .discover import discover
 from .event import REF_EVENTS, Event
 from .evaluate import evaluate_all
 from .gitdiff import GitDiffError, changed_files_from_diff, current_ref
+from .prlookup import PrLookupError, pr_info
 from .report import render_human, render_json, render_list
 
 FALLBACK_REF = "refs/heads/main"
@@ -25,10 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("target", nargs="?", default=".", help="repo root to scan (default: .)")
     p.add_argument(
         "--event",
-        default="push",
+        default=None,
         help="event to simulate: push, pull_request, pull_request_target, "
         "workflow_dispatch, schedule, workflow_call, or any other GitHub event "
-        "name (default: push)",
+        "name (default: pull_request when --pr is given, push otherwise)",
     )
     p.add_argument(
         "--ref",
@@ -50,6 +51,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="activity type for pull_request-like events (opened, synchronize, "
         "reopened, ...); default: GitHub's default types for the event",
     )
+    p.add_argument(
+        "--triggering-workflow",
+        dest="triggering_workflow",
+        default=None,
+        metavar="NAME",
+        help="name of the upstream workflow whose completion is being simulated for "
+        "a workflow_run event, matched against that trigger's `workflows:` list; "
+        "without it, a `workflows:` filter cannot be confirmed and reports SKIPPED",
+    )
     changed = p.add_mutually_exclusive_group()
     changed.add_argument("--changed", metavar="FILES", help="comma-separated changed file paths")
     changed.add_argument(
@@ -62,6 +72,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="BASE",
         help="run `git diff --name-only BASE --` in the target repo to get changed files",
     )
+    changed.add_argument(
+        "--pr",
+        type=int,
+        metavar="NUMBER",
+        help="look up an open GitHub pull request's base branch and changed files with "
+        "`gh pr view` (needs gh on PATH and repo access); sets --event to pull_request "
+        "unless --event is also given",
+    )
     p.add_argument(
         "--workflow",
         action="append",
@@ -73,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--list", action="store_true", help="list workflows and their triggers; skip event evaluation")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
+    p.add_argument(
+        "--fires-only",
+        action="store_true",
+        help="only show workflows that would fire; hide SKIPPED ones and their reasons",
+    )
     p.add_argument("--no-color", action="store_true", help="disable ANSI color")
     p.add_argument(
         "--exit-fires",
@@ -95,7 +118,7 @@ def _read_changed_from(path: str) -> list:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def _resolve_ref(args):
+def _resolve_ref(args, event_name):
     """Return (ref, source) for the event under evaluation.
 
     A hardcoded refs/heads/main default answered for the wrong branch every
@@ -105,7 +128,7 @@ def _resolve_ref(args):
     """
     if args.ref is not None:
         return args.ref, "flag"
-    if args.event in REF_EVENTS:
+    if event_name in REF_EVENTS:
         ref = current_ref(args.target)
         if ref:
             return ref, "git"
@@ -162,6 +185,15 @@ def _build_changed_files(args) -> list:
     return []
 
 
+def _resolve_event_name(args) -> str:
+    """--pr implies a pull_request event -- that is the only event a PR's base
+    branch and changed files mean anything for -- unless the caller overrode
+    --event explicitly."""
+    if args.event is not None:
+        return args.event
+    return "pull_request" if args.pr else "push"
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -182,8 +214,13 @@ def main(argv=None) -> int:
         return 0
 
     try:
-        changed_files = _build_changed_files(args)
-    except GitDiffError as e:
+        if args.pr:
+            pr_base_ref, changed_files = pr_info(args.pr, repo_root=args.target)
+            if args.base_ref is None:
+                args.base_ref = pr_base_ref
+        else:
+            changed_files = _build_changed_files(args)
+    except (GitDiffError, PrLookupError) as e:
         print(f"wouldrun: {e}", file=sys.stderr)
         return 2
     except OSError as e:
@@ -196,13 +233,15 @@ def main(argv=None) -> int:
         print(f"wouldrun: could not read changed files: {e}", file=sys.stderr)
         return 2
 
-    ref, ref_source = _resolve_ref(args)
+    event_name = _resolve_event_name(args)
+    ref, ref_source = _resolve_ref(args, event_name)
     event = Event(
-        name=args.event,
+        name=event_name,
         ref=ref,
         base_ref=args.base_ref,
         changed_files=changed_files,
         activity_type=args.activity_type,
+        triggering_workflow=args.triggering_workflow,
         ref_source=ref_source,
     )
     results = evaluate_all(workflows, event)
@@ -215,11 +254,13 @@ def main(argv=None) -> int:
             print(_no_match_message(unmatched), file=sys.stderr)
             return 2
 
+    display = [r for r in results if r.fires] if args.fires_only else results
+
     if args.json:
-        print(render_json(results, event))
+        print(render_json(display, event))
     else:
         color = not args.no_color and sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
-        print(render_human(results, event, color=color))
+        print(render_human(display, event, color=color, total=results))
 
     if args.exit_fires:
         return 0 if any(r.fires for r in results) else 1

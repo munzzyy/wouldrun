@@ -124,7 +124,13 @@ wouldrun --changed "src/app.py,docs/x.md"        # inline list
 wouldrun --changed-from changed-files.txt        # one path per line
 wouldrun --changed-from -                        # read the list from stdin
 wouldrun --diff main                             # git diff --name-only main -- , in the target repo
+wouldrun --pr 42                                 # gh pr view 42, in the target repo
 ```
+
+`--pr` looks up an already-open GitHub pull request with `gh pr view` and uses its base
+branch and changed files, so there's nothing to transcribe by hand. It needs `gh` on
+PATH and access to the repo, and it sets `--event` to `pull_request` unless you pass
+`--event` yourself. `--base` still wins if you pass it alongside `--pr`.
 
 ### Other events
 
@@ -133,7 +139,13 @@ wouldrun --event pull_request --base main --changed src/app.py
 wouldrun --event pull_request --type labeled --base main
 wouldrun --event workflow_dispatch
 wouldrun --event schedule
+wouldrun --event workflow_run --type completed --triggering-workflow CI --ref main
 ```
+
+`--triggering-workflow` names the upstream workflow whose completion a `workflow_run`
+event is standing in for, checked against that trigger's `workflows:` list. GitHub
+requires `workflows:` for a `workflow_run` trigger to ever run at all, so leaving
+`--triggering-workflow` off reports SKIPPED with the reason rather than guessing.
 
 ### In CI
 
@@ -170,6 +182,8 @@ rather than reporting that nothing fires.
 - default: plain-text report, one block per workflow
 - `--json`: the same verdicts and reasons, machine-readable
 - `--list`: just workflow names and triggers, no event needed
+- `--fires-only`: drop SKIPPED workflows from the output (both text and JSON), for a
+  repo with enough workflow files that scrolling past every skip reason gets old
 
 Full flag reference: `wouldrun --help`.
 
@@ -243,8 +257,11 @@ instead if you want even tags to stop moving.
   `project_card`, and the rest): a `--type` that the workflow's `types:` list leaves out is
   reported as SKIPPED. These events fire on all of their activity types by default, so a
   bare trigger with no `types:` matches any `--type` you pass.
-- `workflow_run`: `types` plus the `branches`/`branches-ignore` filter on the branch
-  of the run that finished, checked against `--ref` the same way a push is.
+- `workflow_run`: `types`, the `workflows:` name list against `--triggering-workflow`
+  (GitHub requires `workflows:` for this trigger to ever run, so a missing list or an
+  unconfirmed name reports SKIPPED, not a guessed FIRES), and the `branches`/
+  `branches-ignore` filter on the branch of the run that finished, checked against
+  `--ref` the same way a push is.
 - GitHub's filter-pattern glob syntax: `*` (never crosses `/`), `**` (crosses `/`, and
   folds its adjoining `/` so `**/README.md` also matches a root-level `README.md`), `?`
   (zero or one of the character before it), `+` (one or more of the character or
@@ -276,9 +293,9 @@ instead if you want even tags to stop moving.
   gated by `if: github.event_name == 'push'` is reported as part of the workflow's job
   list whenever the workflow fires, regardless of what the condition would actually
   decide at runtime.
-- It does not evaluate `on.workflow_run`'s `workflows:` list, because nothing in the
-  repo says which upstream workflow finished. The other `workflow_run` filters are
-  checked, and the report names the `workflows:` list it had to leave alone.
+- It does not know on its own which upstream workflow finished for a `workflow_run`
+  event; you tell it with `--triggering-workflow`. Without that flag, a `workflows:`
+  filter reports SKIPPED rather than a guessed FIRES.
 - It does not check a `schedule:` cron expression against a clock. It confirms the
   trigger exists and shows you the cron string; whether "now" matches it is out of
   scope.

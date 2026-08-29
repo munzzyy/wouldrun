@@ -659,9 +659,12 @@ class TypedEventTypesFilter(unittest.TestCase):
 
 
 class WorkflowRunFilters(unittest.TestCase):
-    """`on.workflow_run` carries `branches`/`branches-ignore` and `workflows:`
-    on top of `types:`. Reading only `types:` reported FIRES for workflows
-    GitHub would never have started, with no hint the other keys existed."""
+    """`on.workflow_run` carries `workflows:`, `branches`/`branches-ignore`, on
+    top of `types:`. `workflows:` is required in practice -- GitHub never runs
+    a `workflow_run` trigger without it -- and wouldrun can only check it
+    against a name the caller supplies with `--triggering-workflow`. Reading
+    only `types:` and treating a missing or unconfirmed `workflows:` as a match
+    reported FIRES for workflows GitHub would never have started."""
 
     TEXT = (
         "on:\n"
@@ -672,50 +675,132 @@ class WorkflowRunFilters(unittest.TestCase):
         "jobs:\n  b:\n    runs-on: u\n"
     )
 
-    def test_branch_outside_the_filter_skips(self):
-        r = _run(self.TEXT, Event(name="workflow_run", ref="refs/heads/main", activity_type="completed"))
+    def test_missing_workflows_list_never_fires(self):
+        # A workflow_run trigger with no `workflows:` at all is dead on
+        # GitHub's side, whatever `--triggering-workflow` says.
+        text = "on:\n  workflow_run:\n    types: [completed]\njobs:\n  b:\n    runs-on: u\n"
+        r = _run(
+            text,
+            Event(
+                name="workflow_run",
+                ref="refs/heads/anything",
+                activity_type="completed",
+                triggering_workflow="CI",
+            ),
+        )
+        self.assertFalse(r.fires)
+        self.assertTrue(any("never runs" in reason for reason in r.reasons))
+
+    def test_workflows_list_without_a_given_name_skips(self):
+        r = _run(
+            self.TEXT,
+            Event(name="workflow_run", ref="refs/heads/release/1", activity_type="completed"),
+        )
+        self.assertFalse(r.fires)
+        self.assertTrue(any("no `--triggering-workflow` given" in reason for reason in r.reasons))
+
+    def test_non_matching_triggering_workflow_skips(self):
+        r = _run(
+            self.TEXT,
+            Event(
+                name="workflow_run",
+                ref="refs/heads/release/1",
+                activity_type="completed",
+                triggering_workflow="CI",
+            ),
+        )
+        self.assertFalse(r.fires)
+        self.assertTrue(any("is not in `workflows:" in reason for reason in r.reasons))
+
+    def test_matching_triggering_workflow_and_branch_fires(self):
+        r = _run(
+            self.TEXT,
+            Event(
+                name="workflow_run",
+                ref="refs/heads/release/1",
+                activity_type="completed",
+                triggering_workflow="Some Other Workflow",
+            ),
+        )
+        self.assertTrue(r.fires)
+
+    def test_matching_workflow_outside_branch_filter_skips(self):
+        r = _run(
+            self.TEXT,
+            Event(
+                name="workflow_run",
+                ref="refs/heads/main",
+                activity_type="completed",
+                triggering_workflow="Some Other Workflow",
+            ),
+        )
         self.assertFalse(r.fires)
         self.assertTrue(any("does not match `branches:" in reason for reason in r.reasons))
 
-    def test_branch_inside_the_filter_fires(self):
-        r = _run(self.TEXT, Event(name="workflow_run", ref="refs/heads/release/1", activity_type="completed"))
-        self.assertTrue(r.fires)
-
-    def test_unevaluated_workflows_filter_is_stated_not_dropped(self):
-        r = _run(self.TEXT, Event(name="workflow_run", ref="refs/heads/release/1", activity_type="completed"))
-        self.assertTrue(any("was not evaluated" in reason for reason in r.reasons))
-
     def test_types_still_decide_first(self):
-        r = _run(self.TEXT, Event(name="workflow_run", ref="refs/heads/release/1", activity_type="requested"))
+        r = _run(
+            self.TEXT,
+            Event(
+                name="workflow_run",
+                ref="refs/heads/release/1",
+                activity_type="requested",
+                triggering_workflow="Some Other Workflow",
+            ),
+        )
         self.assertFalse(r.fires)
 
     def test_branches_ignore_excludes(self):
         text = (
             "on:\n"
             "  workflow_run:\n"
+            "    workflows: ['Build']\n"
             "    types: [completed]\n"
             "    branches-ignore: ['dependabot/**']\n"
             "jobs:\n  b:\n    runs-on: u\n"
         )
-        self.assertFalse(
-            _run(text, Event(name="workflow_run", ref="refs/heads/dependabot/pip/x", activity_type="completed")).fires
+        excluded = Event(
+            name="workflow_run",
+            ref="refs/heads/dependabot/pip/x",
+            activity_type="completed",
+            triggering_workflow="Build",
         )
-        self.assertTrue(
-            _run(text, Event(name="workflow_run", ref="refs/heads/main", activity_type="completed")).fires
+        included = Event(
+            name="workflow_run",
+            ref="refs/heads/main",
+            activity_type="completed",
+            triggering_workflow="Build",
         )
+        self.assertFalse(_run(text, excluded).fires)
+        self.assertTrue(_run(text, included).fires)
 
     def test_tag_ref_against_a_branch_filter_is_reported_not_guessed(self):
         # A workflow_run branch filter has nothing to compare a tag against.
         # Guessing would mean a SKIPPED nobody could check, so it says so and
         # leaves the verdict to the other filters.
-        r = _run(self.TEXT, Event(name="workflow_run", ref="refs/tags/v1.0.0", activity_type="completed"))
+        r = _run(
+            self.TEXT,
+            Event(
+                name="workflow_run",
+                ref="refs/tags/v1.0.0",
+                activity_type="completed",
+                triggering_workflow="Some Other Workflow",
+            ),
+        )
         self.assertTrue(r.fires)
         self.assertTrue(any("did not evaluate it" in reason for reason in r.reasons))
 
-    def test_no_extra_filters_behaves_as_before(self):
-        text = "on:\n  workflow_run:\n    types: [completed]\njobs:\n  b:\n    runs-on: u\n"
+    def test_no_extra_filters_beyond_workflows_still_fires(self):
+        text = "on:\n  workflow_run:\n    workflows: ['CI']\n    types: [completed]\njobs:\n  b:\n    runs-on: u\n"
         self.assertTrue(
-            _run(text, Event(name="workflow_run", ref="refs/heads/anything", activity_type="completed")).fires
+            _run(
+                text,
+                Event(
+                    name="workflow_run",
+                    ref="refs/heads/anything",
+                    activity_type="completed",
+                    triggering_workflow="CI",
+                ),
+            ).fires
         )
 
     def test_other_typed_events_do_not_gain_a_branch_filter(self):

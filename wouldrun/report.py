@@ -27,20 +27,34 @@ def ref_note(event):
     return f"no --ref given and no branch to read from git; assuming `{event.ref}`"
 
 
-def render_human(results, event, color: bool = True) -> str:
+def render_human(results, event, color: bool = True, total=None) -> str:
+    """`results` is what gets printed; `total` (defaults to `results`) is what
+    the header counts against. They differ under `--fires-only`: the header
+    still needs to say how many workflows exist and how many of them fire,
+    even once the SKIPPED ones are dropped from the listing below it.
+    """
+
     def c(code, s):
         return f"{code}{s}{_RESET}" if color else s
 
+    if total is None:
+        total = results
+
     lines = [""]
-    fired = sum(1 for r in results if r.fires)
-    lines.append(f"  wouldrun  event={event.name}  {len(results)} workflow(s), {fired} would fire")
+    fired = sum(1 for r in total if r.fires)
+    lines.append(f"  wouldrun  event={event.name}  {len(total)} workflow(s), {fired} would fire")
     note = ref_note(event)
     if note:
         lines.append(f"  {note}")
     lines.append("")
 
-    if not results:
+    if not total:
         lines.append("  No workflow files found under .github/workflows/.")
+        lines.append("")
+        return "\n".join(lines)
+
+    if not results:
+        lines.append("  No workflow would fire. Drop --fires-only to see why.")
         lines.append("")
         return "\n".join(lines)
 
@@ -67,6 +81,7 @@ def render_json(results, event) -> str:
             "ref_source": getattr(event, "ref_source", "flag"),
             "base_ref": event.base_ref,
             "activity_type": event.activity_type,
+            "triggering_workflow": getattr(event, "triggering_workflow", None),
             "changed_files": event.changed_files,
         },
         "workflows": [

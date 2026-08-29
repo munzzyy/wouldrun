@@ -19,6 +19,11 @@ class Event:
     base_ref: Optional[str] = None  # pull_request: base branch, e.g. "main"
     changed_files: List[str] = field(default_factory=list)
     activity_type: Optional[str] = None  # pull_request: opened, synchronize, ...
+    # workflow_run: the name of the upstream workflow whose completion is being
+    # simulated, matched against `on.workflow_run.workflows:`. None means the
+    # caller did not say, which is not the same as "matches anything" -- see
+    # evaluate.py's `_evaluate_workflow_run_extras`.
+    triggering_workflow: Optional[str] = None
     # Where `ref` came from: "flag" (the user passed --ref), "git" (read from
     # the target repo's HEAD), or "default" (nothing to read it from, so it was
     # assumed). A wrong ref flips every branch filter, so the report says which.

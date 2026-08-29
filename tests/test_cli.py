@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from wouldrun import cli
@@ -346,6 +347,163 @@ class MalformedWorkflowGlob(unittest.TestCase):
         self.assertNotIn("Traceback", out)
         self.assertIn("FIRES", out)
         self.assertIn("SKIPPED", out)
+
+
+class TriggeringWorkflow(unittest.TestCase):
+    """--triggering-workflow feeds `on.workflow_run`'s `workflows:` check."""
+
+    def _repo(self):
+        return workflow_repo(
+            "deploy.yml",
+            "on:\n  workflow_run:\n    workflows: ['CI']\n    types: [completed]\n"
+            "jobs:\n  b:\n    runs-on: u\n",
+        )
+
+    def test_matching_name_fires(self):
+        root = self._repo()
+        code, out, _ = _run(
+            [str(root), "--event", "workflow_run", "--ref", "refs/heads/main", "--type", "completed",
+             "--triggering-workflow", "CI", "--no-color"]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("FIRES", out)
+
+    def test_non_matching_name_skips(self):
+        root = self._repo()
+        code, out, _ = _run(
+            [str(root), "--event", "workflow_run", "--ref", "refs/heads/main", "--type", "completed",
+             "--triggering-workflow", "Lint", "--no-color"]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("SKIPPED", out)
+        self.assertIn("is not in `workflows:", out)
+
+    def test_missing_name_skips_with_a_clear_reason(self):
+        root = self._repo()
+        code, out, _ = _run(
+            [str(root), "--event", "workflow_run", "--ref", "refs/heads/main", "--type", "completed", "--no-color"]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("SKIPPED", out)
+        self.assertIn("no `--triggering-workflow` given", out)
+
+
+class FiresOnly(unittest.TestCase):
+    def _repo(self):
+        return make_repo(
+            {
+                ".github/workflows/ci.yml": "name: CI\non: push\njobs:\n  b:\n    runs-on: u\n",
+                ".github/workflows/dispatch.yml": "name: Manual\non: workflow_dispatch\njobs:\n  b:\n    runs-on: u\n",
+            }
+        )
+
+    def test_hides_skipped_workflows(self):
+        root = self._repo()
+        code, out, _ = _run([str(root), "--event", "push", "--ref", "refs/heads/main", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("SKIPPED", out)
+
+        code, out, _ = _run(
+            [str(root), "--event", "push", "--ref", "refs/heads/main", "--fires-only", "--no-color"]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("FIRES", out)
+        self.assertNotIn("SKIPPED", out)
+        self.assertNotIn("Manual", out)
+
+    def test_filters_json_output_too(self):
+        root = self._repo()
+        code, out, _ = _run([str(root), "--event", "push", "--ref", "refs/heads/main", "--fires-only", "--json"])
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        self.assertEqual([w["name"] for w in payload["workflows"]], ["CI"])
+
+    def test_combines_with_exit_fires(self):
+        root = make_repo(
+            {".github/workflows/dispatch.yml": "on: workflow_dispatch\njobs:\n  b:\n    runs-on: u\n"}
+        )
+        code, out, _ = _run(
+            [str(root), "--event", "push", "--ref", "refs/heads/main", "--fires-only", "--exit-fires", "--no-color"]
+        )
+        self.assertEqual(code, 1)
+        self.assertNotIn("SKIPPED", out)
+
+    def test_nothing_firing_says_so_not_no_workflows_found(self):
+        # Filtering every SKIPPED workflow out of the listing must not read as
+        # "there are no workflow files" -- the header still has to count them.
+        root = make_repo(
+            {".github/workflows/dispatch.yml": "on: workflow_dispatch\njobs:\n  b:\n    runs-on: u\n"}
+        )
+        code, out, _ = _run(
+            [str(root), "--event", "push", "--ref", "refs/heads/main", "--fires-only", "--no-color"]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("1 workflow(s), 0 would fire", out)
+        self.assertIn("No workflow would fire", out)
+        self.assertNotIn("No workflow files found", out)
+
+
+class PrMode(unittest.TestCase):
+    """--pr NUMBER shells out to `gh pr view` for the base branch and changed
+    files instead of making the caller transcribe them by hand."""
+
+    def _repo(self):
+        return workflow_repo(
+            "ci.yml",
+            "on:\n  pull_request:\n    branches: [main]\n    paths: ['src/**']\n"
+            "jobs:\n  b:\n    runs-on: u\n",
+        )
+
+    def _mock_gh(self, stdout="", returncode=0, stderr=""):
+        return unittest.mock.patch(
+            "wouldrun.prlookup.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=["gh"], returncode=returncode, stdout=stdout, stderr=stderr
+            ),
+        )
+
+    def test_pr_populates_base_and_changed_files_and_defaults_the_event(self):
+        payload = json.dumps({"baseRefName": "main", "files": [{"path": "src/a.py"}]})
+        with self._mock_gh(stdout=payload):
+            code, out, _ = _run([str(self._repo()), "--pr", "42", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("FIRES", out)
+        self.assertIn("event=pull_request", out)
+
+    def test_pr_respects_an_explicit_event_override(self):
+        payload = json.dumps({"baseRefName": "main", "files": []})
+        with self._mock_gh(stdout=payload):
+            code, out, _ = _run([str(self._repo()), "--pr", "42", "--event", "push", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("event=push", out)
+
+    def test_pr_respects_an_explicit_base_override(self):
+        payload = json.dumps({"baseRefName": "main", "files": []})
+        with self._mock_gh(stdout=payload):
+            code, out, _ = _run([str(self._repo()), "--pr", "42", "--base", "develop", "--json"])
+        self.assertEqual(code, 0)
+        result = json.loads(out)
+        self.assertEqual(result["event"]["base_ref"], "develop")
+
+    def test_gh_missing_reports_cleanly(self):
+        with unittest.mock.patch(
+            "wouldrun.prlookup.subprocess.run", side_effect=FileNotFoundError()
+        ):
+            code, out, err = _run([str(self._repo()), "--pr", "42"])
+        self.assertEqual(code, 2)
+        self.assertIn("gh was not found on PATH", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_gh_failure_reports_cleanly(self):
+        with self._mock_gh(returncode=1, stderr="no pull requests found"):
+            code, _, err = _run([str(self._repo()), "--pr", "42"])
+        self.assertEqual(code, 2)
+        self.assertIn("gh pr view 42 failed", err)
+
+    def test_pr_and_diff_are_mutually_exclusive(self):
+        with self.assertRaises(SystemExit) as ctx:
+            _run([str(self._repo()), "--pr", "42", "--diff", "main"])
+        self.assertEqual(ctx.exception.code, 2)
 
 
 if __name__ == "__main__":
