@@ -1,7 +1,7 @@
 # wouldrun
 
 [![CI](https://github.com/munzzyy/wouldrun/actions/workflows/ci.yml/badge.svg)](https://github.com/munzzyy/wouldrun/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 
 ![wouldrun evaluating a push to src/app.py: CI fires on the src/** path filter while Docs, Release, and the reusable deploy workflow each skip for a stated reason](docs/media/demo.svg)
@@ -337,7 +337,7 @@ fixed; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT. Free to use, change, and ship, commercial or not. See [LICENSE](LICENSE).
+[GPL-3.0-or-later](LICENSE). You can use, study, change and share it. If you distribute a copy or a modified version, it has to stay under the GPL and come with its source. Releases up to v0.1.0 were under MIT.
 
 ## Support
 
