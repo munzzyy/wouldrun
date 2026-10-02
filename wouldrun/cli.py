@@ -100,7 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--exit-fires",
         action="store_true",
-        help="exit 0 if at least one workflow would fire, 1 otherwise (default: always exit 0)",
+        help="exit 0 if at least one workflow would fire, 1 if none would, and 2 if none "
+        "would but at least one could not be parsed or evaluated, so the answer is "
+        "unknown (default: always exit 0)",
     )
     p.add_argument("--version", action="version", version=f"wouldrun {__version__}")
     return p
@@ -263,8 +265,19 @@ def main(argv=None) -> int:
         print(render_human(display, event, color=color, total=results))
 
     if args.exit_fires:
-        return 0 if any(r.fires for r in results) else 1
+        return _exit_fires_code(results)
     return 0
+
+
+def _exit_fires_code(results) -> int:
+    """A workflow wouldrun could not read might be one GitHub runs, so it
+    turns "nothing fires" into "could not determine" instead of a quiet 1."""
+    if any(r.fires for r in results):
+        return 0
+    undetermined = [r for r in results if r.undetermined]
+    for r in undetermined:
+        print(f"wouldrun: {r.workflow.path}: {r.reasons[0]}", file=sys.stderr)
+    return 2 if undetermined else 1
 
 
 if __name__ == "__main__":

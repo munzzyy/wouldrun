@@ -284,6 +284,74 @@ class WorkflowSelector(unittest.TestCase):
         self.assertIn("not matched directly, but reached anyway", out)
 
 
+class ExitFiresUndetermined(unittest.TestCase):
+    """Under --exit-fires a workflow wouldrun cannot read is not a "no"."""
+
+    TAB_BROKEN = "name: E2E\non:\n  pull_request:\n\tpaths: ['src/**']\njobs:\n  b:\n    runs-on: u\n"
+    BAD_GLOB = "name: E2E\non:\n  pull_request:\n    paths: ['[z-a]']\njobs:\n  b:\n    runs-on: u\n"
+    SRC_ONLY = "name: CI\non:\n  pull_request:\n    paths: ['src/**']\njobs:\n  b:\n    runs-on: u\n"
+    PR_ARGS = ["--event", "pull_request", "--base", "main", "--no-color"]
+
+    def _repo(self, **workflows):
+        return make_repo({f".github/workflows/{name}.yml": text for name, text in workflows.items()})
+
+    def test_named_unparseable_workflow_exits_two_and_says_why(self):
+        root = self._repo(e2e=self.TAB_BROKEN)
+        code, _, err = _run(
+            [str(root), *self.PR_ARGS, "--changed", "src/app.py", "--workflow", "e2e.yml", "--exit-fires"]
+        )
+        self.assertEqual(code, 2)
+        self.assertIn(".github/workflows/e2e.yml", err)
+        self.assertIn("tabs are not allowed", err)
+
+    def test_named_workflow_with_a_bad_glob_exits_two(self):
+        root = self._repo(e2e=self.BAD_GLOB)
+        code, _, err = _run(
+            [str(root), *self.PR_ARGS, "--changed", "src/app.py", "--workflow", "e2e.yml", "--exit-fires"]
+        )
+        self.assertEqual(code, 2)
+        self.assertIn(".github/workflows/e2e.yml", err)
+        self.assertIn("[z-a]", err)
+
+    def test_an_unrelated_broken_workflow_does_not_change_the_named_answer(self):
+        root = self._repo(broken=self.TAB_BROKEN, ci=self.SRC_ONLY)
+        named = ["--workflow", "ci.yml", "--exit-fires"]
+        code, _, err = _run([str(root), *self.PR_ARGS, "--changed", "src/app.py", *named])
+        self.assertEqual((code, err), (0, ""))
+        code, _, err = _run([str(root), *self.PR_ARGS, "--changed", "docs/x.md", *named])
+        self.assertEqual((code, err), (1, ""))
+
+    def test_repo_wide_broken_and_nothing_firing_exits_two(self):
+        root = self._repo(broken=self.TAB_BROKEN, ci=self.SRC_ONLY)
+        code, _, err = _run([str(root), *self.PR_ARGS, "--changed", "docs/x.md", "--exit-fires"])
+        self.assertEqual(code, 2)
+        self.assertIn(".github/workflows/broken.yml", err)
+
+    def test_repo_wide_broken_but_another_fires_exits_zero(self):
+        root = self._repo(broken=self.TAB_BROKEN, ci=self.SRC_ONLY)
+        code, _, _ = _run([str(root), *self.PR_ARGS, "--changed", "src/app.py", "--exit-fires"])
+        self.assertEqual(code, 0)
+
+    def test_without_exit_fires_the_exit_stays_zero(self):
+        root = self._repo(e2e=self.TAB_BROKEN)
+        code, _, _ = _run([str(root), *self.PR_ARGS, "--changed", "src/app.py", "--workflow", "e2e.yml"])
+        self.assertEqual(code, 0)
+
+    def test_json_marks_undetermined_workflows(self):
+        root = self._repo(broken=self.TAB_BROKEN, glob=self.BAD_GLOB, ci=self.SRC_ONLY)
+        code, out, _ = _run([str(root), *self.PR_ARGS, "--changed", "src/app.py", "--json"])
+        self.assertEqual(code, 0)
+        flags = {w["path"]: w["undetermined"] for w in json.loads(out)["workflows"]}
+        self.assertEqual(
+            flags,
+            {
+                ".github/workflows/broken.yml": True,
+                ".github/workflows/ci.yml": False,
+                ".github/workflows/glob.yml": True,
+            },
+        )
+
+
 class Errors(unittest.TestCase):
     def test_missing_target_directory(self):
         code, _, err = _run(["/no/such/path/xyz-wouldrun"])

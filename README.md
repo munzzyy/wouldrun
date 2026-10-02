@@ -160,7 +160,10 @@ install it from git at a commit you chose:
 
 `--exit-fires` makes the exit code reflect the verdict (0 if at least one workflow would
 fire, 1 if none would) instead of the default, which is always 0 so you can pipe the
-report into something else without tripping `set -e`.
+report into something else without tripping `set -e`. Exit 2 means it could not
+determine the answer: nothing fires, but a workflow in scope could not be parsed or
+has a filter pattern wouldrun can't evaluate, and that one might be a workflow GitHub
+runs. The file and the error go to stderr.
 
 Across a whole repo that answer is almost always yes, since one unfiltered
 `push:` or `pull_request:` is enough. The question worth asking in CI is about one

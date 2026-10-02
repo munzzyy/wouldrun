@@ -93,6 +93,7 @@ def render_json(results, event) -> str:
                 "jobs": r.jobs,
                 "called_by": r.called_by,
                 "parse_error": r.workflow.parse_error,
+                "undetermined": r.undetermined,
             }
             for r in results
         ],

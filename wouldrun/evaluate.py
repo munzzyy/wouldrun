@@ -64,6 +64,7 @@ class WorkflowResult:
     reasons: List[str] = field(default_factory=list)
     jobs: List[str] = field(default_factory=list)
     called_by: List[str] = field(default_factory=list)  # "<path> (job <id>)" entries
+    undetermined: bool = False  # the workflow could not be parsed or its filters evaluated
 
 
 def evaluate_all(workflows, event: Event) -> List[WorkflowResult]:
@@ -97,6 +98,7 @@ def _evaluate_direct(workflow, event: Event) -> WorkflowResult:
             workflow=workflow,
             fires=False,
             reasons=[f"could not parse this workflow: {workflow.parse_error}"],
+            undetermined=True,
         )
 
     if event.name not in workflow.triggers:
@@ -119,6 +121,7 @@ def _evaluate_direct(workflow, event: Event) -> WorkflowResult:
             workflow=workflow,
             fires=False,
             reasons=[f"could not evaluate this workflow's filter patterns: {e}"],
+            undetermined=True,
         )
     jobs = sorted(workflow.jobs) if fires else []
     return WorkflowResult(workflow=workflow, fires=fires, reasons=reasons, jobs=jobs)
