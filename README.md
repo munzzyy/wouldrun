@@ -414,10 +414,10 @@ filter-pattern glob syntax with a linear reach-set sweep over a compiled token l
 not a translated regex: a regex where every `*` becomes `[^/]*` is ambiguous enough
 that a pattern a workflow file is allowed to contain sends Python's engine into
 catastrophic backtracking. `wouldrun/evaluate.py` is the trigger-matching engine
-described above. Nothing here calls a model or writes anything. `--pr` is the only
-thing that touches the network, through `gh pr view`; everything else reads local
-files and the local git repo. Every subprocess is a fixed `argv` list, never a shell
-string, and the full list is in "What it does not do" above.
+described above. Nothing here calls a model, and the CLI never writes a file. `--pr`
+is the only thing that touches the network, through `gh pr view`; everything else
+reads local files and the local git repo. Every subprocess is a fixed `argv` list,
+never a shell string, and the full list is in "What it does not do" above.
 
 ## Roadmap
 
