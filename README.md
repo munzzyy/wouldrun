@@ -419,6 +419,24 @@ thing that touches the network, through `gh pr view`; everything else reads loca
 files and the local git repo. Every subprocess is a fixed `argv` list, never a shell
 string, and the full list is in "What it does not do" above.
 
+## Roadmap
+
+What is left needs a person rather than more code: a release, a run on GitHub's own
+runners, and two decisions for the maintainer.
+
+- A v0.2.0 release. The Unreleased part of [CHANGELOG.md](CHANGELOG.md) is on `main`
+  but in no tag, so the `@v0.1.0` pins in this README have none of it. Cutting it means
+  a version bump, a tag and a GitHub Release, and then moving those pins.
+- A live run of the two Action paths that cannot run here: a `pull_request_target`
+  workflow, and `post-comment: "true"` on a pull request from a fork. Both are tested
+  locally with stubbed API calls and with the bash steps run by hand against a scratch
+  clone. CI covers the plain `pull_request` path on this repo's own pull requests.
+  Nobody has watched the other two on a real runner yet.
+- A GitHub Marketplace listing for the Action. That needs the maintainer to accept the
+  Marketplace terms on the owning account.
+- Whether to keep Python 3.9, which reached end of life in October 2025. CI still tests
+  it and nothing in wouldrun needs a newer Python so far.
+
 ## Contributing
 
 Found a case where wouldrun's verdict disagrees with what GitHub actually did? Open an
