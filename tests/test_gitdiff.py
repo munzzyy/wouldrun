@@ -103,6 +103,42 @@ class GitDiff(unittest.TestCase):
         changed = changed_files_from_diff("HEAD", repo_root=str(root))
         self.assertIn("src/we\nird.py", changed)
 
+    def _two_branch_repo(self):
+        # main and feature both move after the fork; feature adds src/a.py.
+        root = _make_git_repo()
+        _git(root, "checkout", "-q", "-b", "feature")
+        (Path(root) / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "feature adds src/a.py")
+        _git(root, "checkout", "-q", "main")
+        (Path(root) / "a.txt").write_text("changed on main\n", encoding="utf-8")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "main drifts")
+        return root
+
+    def test_head_diffs_the_head_tree_without_checking_it_out(self):
+        root = self._two_branch_repo()
+        self.assertEqual(changed_files_from_diff("main", repo_root=str(root)), [])
+        changed = changed_files_from_diff("main", repo_root=str(root), head="feature")
+        self.assertEqual(changed, ["src/a.py"])
+
+    def test_head_ignores_the_working_tree(self):
+        root = self._two_branch_repo()
+        (Path(root) / "a.txt").write_text("uncommitted\n", encoding="utf-8")
+        changed = changed_files_from_diff("main", repo_root=str(root), head="feature")
+        self.assertEqual(changed, ["src/a.py"])
+
+    def test_flag_like_head_is_rejected(self):
+        root = self._two_branch_repo()
+        for bad in ("--output=/tmp/x", "", "-p"):
+            with self.assertRaises(GitDiffError):
+                changed_files_from_diff("main", repo_root=str(root), head=bad)
+
+    def test_unknown_head_raises_clear_error(self):
+        root = self._two_branch_repo()
+        with self.assertRaises(GitDiffError):
+            changed_files_from_diff("main", repo_root=str(root), head="no-such-branch-xyz")
+
     def test_invalid_base_raises_clear_error_not_traceback(self):
         root = _make_git_repo()
         with self.assertRaises(GitDiffError):

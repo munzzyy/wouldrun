@@ -71,7 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
     changed.add_argument(
         "--diff",
         metavar="BASE",
-        help="run `git diff --name-only BASE --` in the target repo to get changed files",
+        help="changed files since the target repo's HEAD forked from BASE, from "
+        "`git merge-base` and `git diff --name-only`, uncommitted edits included",
     )
     changed.add_argument(
         "--pr",
@@ -80,6 +81,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="look up an open GitHub pull request's base branch and changed files with "
         "`gh pr view` (needs gh on PATH and repo access); sets --event to pull_request "
         "unless --event is also given",
+    )
+    p.add_argument(
+        "--head",
+        metavar="REF",
+        help="with --diff: compare REF's committed tree instead of the working tree, "
+        "without checking REF out (the Action uses this on pull_request_target, where "
+        "the checkout is the base branch)",
     )
     p.add_argument(
         "--workflow",
@@ -184,7 +192,7 @@ def _build_changed_files(args) -> list:
     if args.changed_from:
         return _read_changed_from(args.changed_from)
     if args.diff:
-        return changed_files_from_diff(args.diff, repo_root=args.target)
+        return changed_files_from_diff(args.diff, repo_root=args.target, head=args.head)
     return []
 
 
@@ -216,6 +224,10 @@ def main(argv=None) -> int:
         print(render_list(workflows, as_json=args.json))
         return 0
 
+    if args.head is not None and not args.diff:
+        print("wouldrun: --head only works together with --diff", file=sys.stderr)
+        return 2
+
     try:
         if args.pr:
             pr_base_ref, changed_files = pr_info(args.pr, repo_root=args.target)
@@ -243,6 +255,9 @@ def main(argv=None) -> int:
         ref=ref,
         base_ref=args.base_ref,
         changed_files=changed_files,
+        changed_files_given=any(
+            v is not None for v in (args.changed, args.changed_from, args.diff, args.pr)
+        ),
         activity_type=args.activity_type,
         triggering_workflow=args.triggering_workflow,
         ref_source=ref_source,

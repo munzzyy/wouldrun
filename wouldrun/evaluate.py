@@ -204,7 +204,7 @@ def _evaluate_push(spec, event: Event):
         )
         return True, reasons
 
-    ok, why = _match_paths(event.changed_files, paths, paths_ignore)
+    ok, why = _match_paths(event, paths, paths_ignore)
     reasons.append(why)
     if not ok:
         return False, reasons
@@ -254,7 +254,7 @@ def _evaluate_pull_request(event_name, spec, event: Event):
     else:
         reasons.append("no `branches`/`branches-ignore` filter; matches any base branch")
 
-    ok, why = _match_paths(event.changed_files, paths, paths_ignore)
+    ok, why = _match_paths(event, paths, paths_ignore)
     reasons.append(why)
     if not ok:
         return False, reasons
@@ -424,11 +424,14 @@ def _match_pattern_list(value, patterns):
     return matched
 
 
-def _match_paths(changed_files, paths, paths_ignore):
+def _match_paths(event: Event, paths, paths_ignore):
+    changed_files = event.changed_files
     if not paths and not paths_ignore:
         return True, "no `paths`/`paths-ignore` filter; matches regardless of changed files"
     if not changed_files:
         which = "paths" if paths else "paths-ignore"
+        if event.changed_files_given:
+            return False, f"no files changed, so there is nothing for the `{which}` filter to match"
         return False, (
             f"no changed files given (use --changed/--changed-from/--diff) to evaluate "
             f"the `{which}` filter against"

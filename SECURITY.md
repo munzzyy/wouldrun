@@ -26,10 +26,12 @@ fetched to run the action, with no pip install. Nothing from the PR checkout is
 executed: the Python steps run in the runner's temp directory, so a `wouldrun/`
 or `pip/` package in the PR can't stand in for the real one. Only when
 `post-comment: "true"` is set does it call the GitHub API to read and write a
-PR comment. That comment path is the
-one part of this project that needs a write-scoped token
-(`pull-requests: write`) and talks to the network at all; see the README's
-GitHub Action section for why it's opt-in rather than the default.
+PR comment. That comment path is the one part of this project that needs a
+write-scoped token (`pull-requests: write`); see the README's GitHub Action
+section for why it's opt-in rather than the default. On `pull_request_target`
+the Action also fetches the PR's head commit, authenticated with the
+`github-token` input, so it can diff it. That commit is never checked out, and
+the only thing read from it is the list of paths it changed.
 
 ## Reporting a vulnerability
 

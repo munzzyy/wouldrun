@@ -352,6 +352,76 @@ class ExitFiresUndetermined(unittest.TestCase):
         )
 
 
+class EmptyChangeSet(unittest.TestCase):
+    TEXT = "on:\n  pull_request_target:\n    paths: ['src/**']\njobs:\n  b:\n    runs-on: u\n"
+
+    def test_no_source_given_asks_for_one(self):
+        root = workflow_repo("t.yml", self.TEXT)
+        code, out, _ = _run([str(root), "--event", "pull_request_target", "--base", "main", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("no changed files given (use --changed/--changed-from/--diff)", out)
+
+    def test_an_empty_source_says_nothing_changed(self):
+        root = workflow_repo("t.yml", self.TEXT)
+        empty = Path(tempfile.mkdtemp()) / "none.txt"
+        empty.write_text("", encoding="utf-8")
+        code, out, _ = _run(
+            [str(root), "--event", "pull_request_target", "--base", "main", "--changed-from", str(empty), "--no-color"]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("no files changed", out)
+        self.assertNotIn("use --changed", out)
+
+    def test_head_without_diff_is_a_usage_error(self):
+        root = workflow_repo("t.yml", self.TEXT)
+        code, _, err = _run([str(root), "--event", "pull_request_target", "--head", "feature"])
+        self.assertEqual(code, 2)
+        self.assertIn("--head only works together with --diff", err)
+
+
+@unittest.skipUnless(_HAVE_GIT, "git not available")
+class HeadOnABaseCheckout(unittest.TestCase):
+    """pull_request_target checks out the base branch, so the PR's files only
+    show up when the head is diffed by ref."""
+
+    def test_pull_request_target_fires_with_head(self):
+        origin = make_repo(
+            {
+                ".github/workflows/t.yml": (
+                    "on:\n  pull_request_target:\n    paths: ['src/**']\njobs:\n  b:\n    runs-on: u\n"
+                ),
+                "README.md": "hi\n",
+            }
+        )
+        _git(origin, "init", "-q", "-b", "main")
+        _git(origin, "config", "user.email", "test@example.com")
+        _git(origin, "config", "user.name", "Test")
+        _git(origin, "add", "-A")
+        _git(origin, "commit", "-q", "-m", "base")
+        _git(origin, "checkout", "-q", "-b", "feature")
+        (origin / "src").mkdir()
+        (origin / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+        _git(origin, "add", "-A")
+        _git(origin, "commit", "-q", "-m", "add src/a.py")
+        _git(origin, "checkout", "-q", "main")
+        clone = Path(tempfile.mkdtemp()) / "clone"
+        subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True, capture_output=True)
+
+        args = [str(clone), "--event", "pull_request_target", "--base", "main", "--diff", "origin/main", "--json"]
+        code, out, _ = _run(args)
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["event"]["changed_files"], [])
+        self.assertFalse(payload["workflows"][0]["fires"])
+        self.assertIn("no files changed", payload["workflows"][0]["reasons"][-1])
+
+        code, out, _ = _run(args + ["--head", "origin/feature"])
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["event"]["changed_files"], ["src/a.py"])
+        self.assertTrue(payload["workflows"][0]["fires"])
+
+
 class Errors(unittest.TestCase):
     def test_missing_target_directory(self):
         code, _, err = _run(["/no/such/path/xyz-wouldrun"])

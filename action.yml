@@ -20,8 +20,8 @@ inputs:
     default: "false"
   github-token:
     description: >-
-      Token used to read and update the sticky PR comment. Only used when
-      post-comment is "true"; ignored otherwise.
+      Token used to read and update the sticky PR comment when post-comment
+      is "true", and on pull_request_target to fetch the PR's head commit.
     required: false
     default: ${{ github.token }}
   python-version:
@@ -72,6 +72,25 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
+    - name: Fetch the PR head on pull_request_target
+      # That event checks out the base branch; fetch the head commit so it can
+      # be diffed, and never check it out.
+      if: steps.guard.outputs.skip != 'true' && github.event_name == 'pull_request_target'
+      shell: bash
+      env:
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        FETCH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -e
+        if [ -n "$FETCH_TOKEN" ]; then
+          auth=$(printf 'x-access-token:%s' "$FETCH_TOKEN" | base64 | tr -d '\n')
+          echo "::add-mask::$auth"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.$GITHUB_SERVER_URL/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+        fi
+        git -C "$GITHUB_WORKSPACE" fetch --no-tags --quiet origin "+$HEAD_SHA:refs/remotes/wouldrun/pr-head"
+
     - name: Run wouldrun against the PR's base and changed files
       # The cwd goes first on sys.path, so Python never runs from the PR checkout.
       if: steps.guard.outputs.skip != 'true'
@@ -81,14 +100,20 @@ runs:
         PYTHONPATH: ${{ github.action_path }}
         EVENT_NAME: ${{ github.event_name }}
         BASE_REF: ${{ github.event.pull_request.base.ref }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         ACTIVITY_TYPE: ${{ github.event.action }}
       run: |
         set -e
+        head_args=()
+        if [ "$EVENT_NAME" = "pull_request_target" ]; then
+          head_args=(--head "$HEAD_SHA")
+        fi
         python3 -m wouldrun "$GITHUB_WORKSPACE" \
           --event "$EVENT_NAME" \
           --base "$BASE_REF" \
           --type "$ACTIVITY_TYPE" \
           --diff "origin/$BASE_REF" \
+          "${head_args[@]}" \
           --json > "$RUNNER_TEMP/wouldrun.json"
 
     - name: Format the report as markdown

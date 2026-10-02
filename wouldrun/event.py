@@ -28,6 +28,8 @@ class Event:
     # the target repo's HEAD), or "default" (nothing to read it from, so it was
     # assumed). A wrong ref flips every branch filter, so the report says which.
     ref_source: str = "flag"
+    # A changed-files source was given, so an empty list means nothing changed.
+    changed_files_given: bool = False
 
 
 def classify_ref(ref: Optional[str]):

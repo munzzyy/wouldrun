@@ -123,9 +123,15 @@ information as `event.ref_source`: `flag`, `git`, or `default`.
 wouldrun --changed "src/app.py,docs/x.md"        # inline list
 wouldrun --changed-from changed-files.txt        # one path per line
 wouldrun --changed-from -                        # read the list from stdin
-wouldrun --diff main                             # git diff --name-only main -- , in the target repo
+wouldrun --diff main                             # changes since this branch forked from main
+wouldrun --diff main --head feature              # feature's committed changes, no checkout
 wouldrun --pr 42                                 # gh pr view 42, in the target repo
 ```
+
+`--diff` finds where the checked-out branch forked from BASE and lists what changed
+since, uncommitted edits included. `--head REF` diffs REF's committed tree instead,
+without checking it out. The Action uses that on `pull_request_target`, where the
+checkout is the base branch and the PR's files would otherwise never show up.
 
 `--pr` looks up an already-open GitHub pull request with `gh pr view` and uses its base
 branch and changed files, so there's nothing to transcribe by hand. It needs `gh` on
@@ -208,7 +214,9 @@ Full flag reference: `wouldrun --help`.
 
 `action.yml` at the repo root wraps the CLI as a composite Action for any repo's
 own pull requests: it checks out the PR, runs wouldrun against the PR's base and
-changed files, and reports the FIRES/SKIPPED table.
+changed files, and reports the FIRES/SKIPPED table. On `pull_request_target`, where
+GitHub checks out the base branch, it fetches the PR's head commit with the
+`github-token` input and diffs that without checking it out.
 
 By default that report only goes to the job summary, nothing posted anywhere,
 no permission beyond the default `contents: read`:

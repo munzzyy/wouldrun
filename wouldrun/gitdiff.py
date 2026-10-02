@@ -16,11 +16,18 @@ class GitDiffError(RuntimeError):
     pass
 
 
-def changed_files_from_diff(base: str, repo_root: str = ".") -> list:
+def changed_files_from_diff(base: str, repo_root: str = ".", head=None) -> list:
+    """Paths changed since `base` forked: in the working tree, or, when `head`
+    is given, in `head`'s committed tree, which never needs to be checked out."""
     if not base or not isinstance(base, str):
         raise GitDiffError("--diff needs a non-empty base ref or commit")
     if base.startswith("-"):
         raise GitDiffError(f"refusing base ref {base!r}: looks like a flag, not a ref")
+    if head is not None:
+        if not head or not isinstance(head, str):
+            raise GitDiffError("--head needs a non-empty ref or commit")
+        if head.startswith("-"):
+            raise GitDiffError(f"refusing head ref {head!r}: looks like a flag, not a ref")
     if not os.path.isdir(repo_root):
         raise GitDiffError(f"no such directory: {repo_root}")
 
@@ -33,13 +40,14 @@ def changed_files_from_diff(base: str, repo_root: str = ".") -> list:
     # the merge-base *commit* (rather than the `BASE...HEAD` range) keeps
     # uncommitted working-tree changes in the result, which is half the point
     # of running wouldrun locally.
-    merge_base = _merge_base(base, repo_root)
+    merge_base = _merge_base(base, repo_root, head or "HEAD")
     # `-z` (NUL-separated, never quoted) instead of one path per line. Without
     # it git applies core.quotepath and returns `"src/caf\303\251.py"` for any
     # path with a non-ASCII byte in it -- quotes, backslashes and all -- which
     # matches no filter pattern and turns a workflow GitHub would run into a
     # confident SKIPPED. `-z` also survives a path with a newline in it.
-    argv = _git_argv(repo_root, "diff", "--name-only", "--no-color", "-z", merge_base, "--")
+    trees = (merge_base, head) if head else (merge_base,)
+    argv = _git_argv(repo_root, "diff", "--name-only", "--no-color", "-z", *trees, "--")
     proc = _run_git(argv)
     if proc.returncode != 0:
         raise GitDiffError(f"git diff failed: {proc.stderr.strip() or proc.returncode}")
@@ -66,11 +74,11 @@ def current_ref(repo_root: str = ".") -> str:
     return "refs/heads/" + branch if branch else ""
 
 
-def _merge_base(base: str, repo_root: str) -> str:
-    proc = _run_git(_git_argv(repo_root, "merge-base", base, "HEAD"))
+def _merge_base(base: str, repo_root: str, head: str) -> str:
+    proc = _run_git(_git_argv(repo_root, "merge-base", base, head))
     if proc.returncode != 0:
         raise GitDiffError(
-            f"could not find a merge base for {base!r} and HEAD: "
+            f"could not find a merge base for {base!r} and {head}: "
             f"{proc.stderr.strip() or proc.returncode}"
         )
     return proc.stdout.strip()
