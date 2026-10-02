@@ -6,6 +6,7 @@
   `--triggering-workflow NAME`. A missing list or no name to check reports SKIPPED
   instead of a guessed FIRES.
 - `--pr NUMBER` takes a pull request base branch and its changed files from `gh pr view`.
+  Past 100 files it pages through `gh api` and exits 2 if the list is still short.
 - `--fires-only` drops SKIPPED workflows from the report.
 - The license is now GPL-3.0-or-later. Releases up to 0.1.0 stay under MIT.
 - YAML anchors and aliases are resolved. Reading them as text used to drop triggers

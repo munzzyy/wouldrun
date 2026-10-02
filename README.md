@@ -151,7 +151,11 @@ checkout is the base branch and the PR's files would otherwise never show up.
 `--pr` looks up an already-open GitHub pull request with `gh pr view` and uses its base
 branch and changed files, so there is nothing to transcribe by hand. It needs `gh` on
 PATH and access to the repo, and it sets `--event` to `pull_request` unless you pass
-`--event` yourself. `--base` still wins if you pass it alongside `--pr`.
+`--event` yourself. `--base` still wins if you pass it alongside `--pr`. `gh pr view`
+lists at most 100 files, so for a bigger pull request wouldrun makes one more call,
+`gh api --paginate` on the pull request's file list. If GitHub still lists fewer files
+than the pull request changes, it exits 2 instead of judging path filters on part of
+the list.
 
 ### Other events
 
@@ -396,7 +400,7 @@ this needs a commit from `main`.
   programs it starts are read-only lookups, each with a fixed argument list and a 30 s
   timeout: `git merge-base`, `git diff --name-only` and `git ls-files --others` for
   `--diff`, `git symbolic-ref HEAD` for the `--ref` default, and `gh pr view` for
-  `--pr`.
+  `--pr`, plus `gh api` for the file list of a pull request with more than 100 files.
 
 ## How it works
 
@@ -419,9 +423,10 @@ not a translated regex: a regex where every `*` becomes `[^/]*` is ambiguous eno
 that a pattern a workflow file is allowed to contain sends Python's engine into
 catastrophic backtracking. `wouldrun/evaluate.py` is the trigger-matching engine
 described above. Nothing here calls a model, and the CLI never writes a file. In the
-CLI, `--pr` is the only thing that touches the network, through `gh pr view`; everything
-else reads local files and the local git repo. The Action goes to the network for more
-than that: `actions/checkout` and `actions/setup-python`, a `git fetch` of the PR head on
+CLI, `--pr` is the only thing that touches the network, through `gh pr view` and, past
+100 changed files, `gh api`; everything else reads local files and the local git repo.
+The Action goes to the network for more than that: `actions/checkout` and
+`actions/setup-python`, a `git fetch` of the PR head on
 `pull_request_target`, and the GitHub API when `post-comment` is on. Every subprocess is
 a fixed `argv` list, never a shell string, and the full list is in "What it does not do"
 above.

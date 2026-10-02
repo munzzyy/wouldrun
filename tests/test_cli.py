@@ -699,7 +699,7 @@ class PrMode(unittest.TestCase):
         )
 
     def test_pr_populates_base_and_changed_files_and_defaults_the_event(self):
-        payload = json.dumps({"baseRefName": "main", "files": [{"path": "src/a.py"}]})
+        payload = json.dumps({"baseRefName": "main", "files": [{"path": "src/a.py"}], "changedFiles": 1})
         with self._mock_gh(stdout=payload):
             code, out, _ = _run([str(self._repo()), "--pr", "42", "--no-color"])
         self.assertEqual(code, 0)
@@ -707,14 +707,14 @@ class PrMode(unittest.TestCase):
         self.assertIn("event=pull_request", out)
 
     def test_pr_respects_an_explicit_event_override(self):
-        payload = json.dumps({"baseRefName": "main", "files": []})
+        payload = json.dumps({"baseRefName": "main", "files": [], "changedFiles": 0})
         with self._mock_gh(stdout=payload):
             code, out, _ = _run([str(self._repo()), "--pr", "42", "--event", "push", "--no-color"])
         self.assertEqual(code, 0)
         self.assertIn("event=push", out)
 
     def test_pr_respects_an_explicit_base_override(self):
-        payload = json.dumps({"baseRefName": "main", "files": []})
+        payload = json.dumps({"baseRefName": "main", "files": [], "changedFiles": 0})
         with self._mock_gh(stdout=payload):
             code, out, _ = _run([str(self._repo()), "--pr", "42", "--base", "develop", "--json"])
         self.assertEqual(code, 0)
@@ -735,6 +735,32 @@ class PrMode(unittest.TestCase):
             code, _, err = _run([str(self._repo()), "--pr", "42"])
         self.assertEqual(code, 2)
         self.assertIn("gh pr view 42 failed", err)
+
+    def _big_pr(self, listed):
+        docs = [f"docs/{i}.md" for i in range(100)]
+        view = json.dumps({"baseRefName": "main", "files": [{"path": p} for p in docs], "changedFiles": 101})
+        pages = json.dumps([[{"filename": p} for p in docs], [{"filename": "src/late.py"}][:listed - 100]])
+        return unittest.mock.patch(
+            "wouldrun.prlookup.subprocess.run",
+            side_effect=[
+                subprocess.CompletedProcess(args=["gh"], returncode=0, stdout=view, stderr=""),
+                subprocess.CompletedProcess(args=["gh"], returncode=0, stdout=pages, stderr=""),
+            ],
+        )
+
+    def test_a_file_past_the_first_100_still_counts(self):
+        with self._big_pr(listed=101):
+            code, out, _ = _run([str(self._repo()), "--pr", "42", "--json"])
+        self.assertEqual(code, 0)
+        result = json.loads(out)
+        self.assertEqual(len(result["event"]["changed_files"]), 101)
+        self.assertTrue(result["workflows"][0]["fires"])
+
+    def test_a_list_that_stays_short_exits_2(self):
+        with self._big_pr(listed=100):
+            code, _, err = _run([str(self._repo()), "--pr", "42"])
+        self.assertEqual(code, 2)
+        self.assertIn("changes 101 files", err)
 
     def test_pr_and_diff_are_mutually_exclusive(self):
         with self.assertRaises(SystemExit) as ctx:

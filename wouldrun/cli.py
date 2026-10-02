@@ -102,8 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="NUMBER",
         help="look up an open GitHub pull request's base branch and changed files with "
-        "`gh pr view` (needs gh on PATH and repo access); sets --event to pull_request "
-        "unless --event is also given",
+        "`gh pr view`, and `gh api` past 100 files (needs gh on PATH and repo access); "
+        "sets --event to pull_request unless --event is also given",
     )
     p.add_argument(
         "--head",
