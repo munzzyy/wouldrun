@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from . import __version__
-from .event import REF_EVENTS
+from .event import BASE_EVENTS, REF_EVENTS
 
 _GREEN = "\033[32m"
 _GRAY = "\033[90m"
@@ -27,6 +27,13 @@ def ref_note(event):
     return f"no --ref given and no branch to read from git; assuming `{event.ref}`"
 
 
+def base_note(event):
+    """One line saying the PR base was assumed, or None."""
+    if event.name not in BASE_EVENTS or getattr(event, "base_ref_source", "flag") != "default":
+        return None
+    return f"no --base given; assuming `{event.base_ref}`"
+
+
 def render_human(results, event, color: bool = True, total=None) -> str:
     """`results` is what gets printed; `total` (defaults to `results`) is what
     the header counts against. They differ under `--fires-only`: the header
@@ -43,9 +50,9 @@ def render_human(results, event, color: bool = True, total=None) -> str:
     lines = [""]
     fired = sum(1 for r in total if r.fires)
     lines.append(f"  wouldrun  event={event.name}  {len(total)} workflow(s), {fired} would fire")
-    note = ref_note(event)
-    if note:
-        lines.append(f"  {note}")
+    for note in (ref_note(event), base_note(event)):
+        if note:
+            lines.append(f"  {note}")
     lines.append("")
 
     if not total:
@@ -80,6 +87,7 @@ def render_json(results, event) -> str:
             "ref": event.ref,
             "ref_source": getattr(event, "ref_source", "flag"),
             "base_ref": event.base_ref,
+            "base_ref_source": getattr(event, "base_ref_source", "flag"),
             "activity_type": event.activity_type,
             "triggering_workflow": getattr(event, "triggering_workflow", None),
             "changed_files": event.changed_files,

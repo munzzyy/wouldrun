@@ -422,6 +422,94 @@ class HeadOnABaseCheckout(unittest.TestCase):
         self.assertTrue(payload["workflows"][0]["fires"])
 
 
+_EXAMPLE_REPO = str(Path(__file__).resolve().parent.parent / "examples" / "example-repo")
+
+
+class ChangedPathNormalization(unittest.TestCase):
+    PUSH = [_EXAMPLE_REPO, "--event", "push", "--ref", "main", "--workflow", "ci", "--json"]
+
+    def _fires(self, argv):
+        code, out, err = _run(argv)
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        return payload["workflows"][0]["fires"], payload["event"]["changed_files"], err
+
+    def test_dot_slash_prefix_is_stripped_from_changed(self):
+        fires, files, _ = self._fires(self.PUSH + ["--changed", "./src/app.py"])
+        self.assertTrue(fires)
+        self.assertEqual(files, ["src/app.py"])
+
+    def test_dot_slash_prefix_is_stripped_from_changed_from(self):
+        listing = Path(tempfile.mkdtemp()) / "changed.txt"
+        listing.write_text("./src/app.py\n././docs/x.md\n", encoding="utf-8")
+        fires, files, _ = self._fires(self.PUSH + ["--changed-from", str(listing)])
+        self.assertTrue(fires)
+        self.assertEqual(files, ["src/app.py", "docs/x.md"])
+
+    def test_leading_slash_is_stripped_with_a_note(self):
+        fires, files, err = self._fires(self.PUSH + ["--changed", "/src/app.py,/docs/x.md"])
+        self.assertTrue(fires)
+        self.assertEqual(files, ["src/app.py", "docs/x.md"])
+        self.assertIn("dropped the leading '/' from '/src/app.py' and 1 more", err)
+
+    def test_clean_paths_get_no_note(self):
+        _, _, err = self._fires(self.PUSH + ["--changed", "src/app.py"])
+        self.assertEqual(err, "")
+
+    def test_backslashes_become_slashes_only_on_windows(self):
+        self.assertEqual(cli.normalize_changed_path("src\\app.py", sep="\\"), ("src/app.py", False))
+        self.assertEqual(cli.normalize_changed_path(".\\src\\app.py", sep="\\"), ("src/app.py", False))
+        self.assertEqual(cli.normalize_changed_path("src\\app.py", sep="/"), ("src\\app.py", False))
+        self.assertEqual(cli.normalize_changed_path("/src/app.py", sep="/"), ("src/app.py", True))
+
+
+class BaseBranchSource(unittest.TestCase):
+    TEXT = "on:\n  pull_request:\n    branches: [main]\njobs:\n  b:\n    runs-on: u\n"
+
+    def test_missing_base_is_assumed_and_said(self):
+        root = workflow_repo("ci.yml", self.TEXT)
+        code, out, _ = _run([str(root), "--event", "pull_request", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("no --base given; assuming `main`", out)
+        code, out, _ = _run([str(root), "--event", "pull_request", "--json"])
+        event = json.loads(out)["event"]
+        self.assertEqual((event["base_ref"], event["base_ref_source"]), ("main", "default"))
+
+    def test_given_base_is_not_annotated(self):
+        root = workflow_repo("ci.yml", self.TEXT)
+        code, out, _ = _run([str(root), "--event", "pull_request", "--base", "dev", "--no-color"])
+        self.assertNotIn("no --base given", out)
+        code, out, _ = _run([str(root), "--event", "pull_request", "--base", "dev", "--json"])
+        event = json.loads(out)["event"]
+        self.assertEqual((event["base_ref"], event["base_ref_source"]), ("dev", "flag"))
+
+    def test_push_gets_no_base_note(self):
+        root = workflow_repo("ci.yml", self.TEXT)
+        _, out, _ = _run([str(root), "--event", "push", "--ref", "main", "--no-color"])
+        self.assertNotIn("no --base given", out)
+
+
+class EventNameWarnings(unittest.TestCase):
+    def _root(self):
+        return workflow_repo("ci.yml", "on: [push, pull_request]\njobs:\n  b:\n    runs-on: u\n")
+
+    def test_typo_suggests_the_close_match(self):
+        code, _, err = _run([str(self._root()), "--event", "pul_request", "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("`pul_request` is not a GitHub event wouldrun knows; did you mean `pull_request`?", err)
+
+    def test_type_is_ignored_for_push(self):
+        code, _, err = _run([str(self._root()), "--event", "push", "--ref", "main", "--type", "opened"])
+        self.assertEqual(code, 0)
+        self.assertIn("--type is ignored for `push`", err)
+
+    def test_known_events_get_no_warning(self):
+        for argv in (["--event", "pull_request", "--type", "labeled"], ["--event", "repository_dispatch", "--type", "x"],
+                     ["--event", "workflow_dispatch"], ["--event", "push", "--ref", "main"]):
+            _, _, err = _run([str(self._root()), *argv, "--no-color"])
+            self.assertEqual(err, "", argv)
+
+
 class Errors(unittest.TestCase):
     def test_missing_target_directory(self):
         code, _, err = _run(["/no/such/path/xyz-wouldrun"])

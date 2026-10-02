@@ -3,18 +3,39 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import os
 import sys
 
 from . import __version__
 from .discover import discover
-from .event import REF_EVENTS, Event
-from .evaluate import evaluate_all
+from .event import FALLBACK_BASE, REF_EVENTS, Event
+from .evaluate import TYPED_EVENTS, evaluate_all
 from .gitdiff import GitDiffError, changed_files_from_diff, current_ref
 from .prlookup import PrLookupError, pr_info
 from .report import render_human, render_json, render_list
 
 FALLBACK_REF = "refs/heads/main"
+
+# GitHub events that take no activity types.
+_UNTYPED_EVENTS = frozenset(
+    {
+        "create",
+        "delete",
+        "deployment",
+        "deployment_status",
+        "fork",
+        "gollum",
+        "page_build",
+        "public",
+        "push",
+        "schedule",
+        "status",
+        "workflow_call",
+        "workflow_dispatch",
+    }
+)
+KNOWN_EVENTS = TYPED_EVENTS | _UNTYPED_EVENTS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,7 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--base",
         dest="base_ref",
         default=None,
-        help="base branch for pull_request/pull_request_target (default: main)",
+        help="base branch for pull_request/pull_request_target (default: the PR's "
+        "base with --pr, main otherwise)",
     )
     p.add_argument(
         "--type",
@@ -72,7 +94,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--diff",
         metavar="BASE",
         help="changed files since the target repo's HEAD forked from BASE, from "
-        "`git merge-base` and `git diff --name-only`, uncommitted edits included",
+        "`git merge-base` and `git diff --name-only`, uncommitted edits and "
+        "untracked, non-ignored files included",
     )
     changed.add_argument(
         "--pr",
@@ -186,11 +209,46 @@ def _no_match_message(unmatched) -> str:
     return f"wouldrun: no workflow matches --workflow {names}"
 
 
+def normalize_changed_path(path: str, sep: str = os.sep):
+    """Return (path, had_a_leading_slash) for a hand-typed changed path, in the
+    repo-relative, `/`-separated form GitHub matches `paths:` against."""
+    if sep == "\\":
+        path = path.replace("\\", "/")
+    rooted = False
+    while True:
+        if path.startswith("./"):
+            path = path[2:]
+        elif path.startswith("/"):
+            path = path[1:]
+            rooted = True
+        else:
+            return path, rooted
+
+
+def _normalize_typed_paths(paths) -> list:
+    out = []
+    rooted = []
+    for raw in paths:
+        path, was_rooted = normalize_changed_path(raw)
+        if was_rooted:
+            rooted.append(raw)
+        if path:
+            out.append(path)
+    if rooted:
+        more = f" and {len(rooted) - 1} more" if len(rooted) > 1 else ""
+        print(
+            f"wouldrun: changed paths are relative to the repo root; dropped the leading "
+            f"'/' from {rooted[0]!r}{more}",
+            file=sys.stderr,
+        )
+    return out
+
+
 def _build_changed_files(args) -> list:
     if args.changed:
-        return [f.strip() for f in args.changed.split(",") if f.strip()]
+        return _normalize_typed_paths(f.strip() for f in args.changed.split(",") if f.strip())
     if args.changed_from:
-        return _read_changed_from(args.changed_from)
+        return _normalize_typed_paths(_read_changed_from(args.changed_from))
     if args.diff:
         return changed_files_from_diff(args.diff, repo_root=args.target, head=args.head)
     return []
@@ -224,15 +282,18 @@ def main(argv=None) -> int:
         print(render_list(workflows, as_json=args.json))
         return 0
 
+    event_name = _resolve_event_name(args)
+    for warning in _event_warnings(event_name, args.activity_type):
+        print(warning, file=sys.stderr)
+
     if args.head is not None and not args.diff:
         print("wouldrun: --head only works together with --diff", file=sys.stderr)
         return 2
 
+    pr_base_ref = None
     try:
         if args.pr:
             pr_base_ref, changed_files = pr_info(args.pr, repo_root=args.target)
-            if args.base_ref is None:
-                args.base_ref = pr_base_ref
         else:
             changed_files = _build_changed_files(args)
     except (GitDiffError, PrLookupError) as e:
@@ -248,12 +309,18 @@ def main(argv=None) -> int:
         print(f"wouldrun: could not read changed files: {e}", file=sys.stderr)
         return 2
 
-    event_name = _resolve_event_name(args)
+    if args.base_ref is not None:
+        base_ref, base_ref_source = args.base_ref, "flag"
+    elif pr_base_ref is not None:
+        base_ref, base_ref_source = pr_base_ref, "pr"
+    else:
+        base_ref, base_ref_source = FALLBACK_BASE, "default"
     ref, ref_source = _resolve_ref(args, event_name)
     event = Event(
         name=event_name,
         ref=ref,
-        base_ref=args.base_ref,
+        base_ref=base_ref,
+        base_ref_source=base_ref_source,
         changed_files=changed_files,
         changed_files_given=any(
             v is not None for v in (args.changed, args.changed_from, args.diff, args.pr)
@@ -283,6 +350,17 @@ def main(argv=None) -> int:
     if args.exit_fires:
         return _exit_fires_code(results)
     return 0
+
+
+def _event_warnings(event_name, activity_type) -> list:
+    """A mistyped --event otherwise reports every workflow SKIPPED and exits 0."""
+    if event_name not in KNOWN_EVENTS:
+        close = difflib.get_close_matches(event_name, sorted(KNOWN_EVENTS), n=1)
+        hint = f"; did you mean `{close[0]}`?" if close else ""
+        return [f"wouldrun: `{event_name}` is not a GitHub event wouldrun knows{hint}"]
+    if activity_type and event_name not in TYPED_EVENTS:
+        return [f"wouldrun: --type is ignored for `{event_name}`, which has no activity types"]
+    return []
 
 
 def _exit_fires_code(results) -> int:

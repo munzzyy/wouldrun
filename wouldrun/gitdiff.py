@@ -17,8 +17,9 @@ class GitDiffError(RuntimeError):
 
 
 def changed_files_from_diff(base: str, repo_root: str = ".", head=None) -> list:
-    """Paths changed since `base` forked: in the working tree, or, when `head`
-    is given, in `head`'s committed tree, which never needs to be checked out."""
+    """Paths changed since `base` forked: in the working tree, untracked files
+    included, or, when `head` is given, in `head`'s committed tree, which never
+    needs to be checked out."""
     if not base or not isinstance(base, str):
         raise GitDiffError("--diff needs a non-empty base ref or commit")
     if base.startswith("-"):
@@ -51,8 +52,16 @@ def changed_files_from_diff(base: str, repo_root: str = ".", head=None) -> list:
     proc = _run_git(argv)
     if proc.returncode != 0:
         raise GitDiffError(f"git diff failed: {proc.stderr.strip() or proc.returncode}")
+    paths = [path for path in proc.stdout.split("\0") if path.strip()]
 
-    return [path for path in proc.stdout.split("\0") if path.strip()]
+    if head is None:
+        # A new file nobody has `git add`ed yet is a change too; ignored files are not.
+        proc = _run_git(_git_argv(repo_root, "ls-files", "--others", "--exclude-standard", "-z"))
+        if proc.returncode != 0:
+            raise GitDiffError(f"git ls-files failed: {proc.stderr.strip() or proc.returncode}")
+        seen = set(paths)
+        paths += [path for path in proc.stdout.split("\0") if path.strip() and path not in seen]
+    return paths
 
 
 def current_ref(repo_root: str = ".") -> str:

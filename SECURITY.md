@@ -7,9 +7,10 @@ never executes a workflow. The only time it talks to the network is `--pr`,
 which asks `gh pr view` for a pull request's base branch and changed files.
 
 It does shell out, always read-only and always with a fixed `argv` list rather
-than a shell string: `git merge-base` and `git diff --name-only` when you pass
-`--diff`, `git symbolic-ref HEAD` to read the current branch when you leave
-`--ref` off, and `gh pr view` when you pass `--pr`. A base ref starting with
+than a shell string: `git merge-base`, `git diff --name-only` and
+`git ls-files --others` when you pass `--diff`, `git symbolic-ref HEAD` to read
+the current branch when you leave `--ref` off, and `gh pr view` when you pass
+`--pr`. A base ref starting with
 `-` is rejected before it reaches git, so a crafted `--diff` value cannot
 smuggle in a flag, and every call times out after 30s.
 

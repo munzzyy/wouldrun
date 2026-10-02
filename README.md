@@ -117,6 +117,15 @@ If there's no branch to read (not a git repo, detached HEAD, no git on PATH) it
 falls back to `refs/heads/main` and says that instead. `--json` carries the same
 information as `event.ref_source`: `flag`, `git`, or `default`.
 
+A `pull_request` or `pull_request_target` run works the same way for the base
+branch: leave `--base` off (and `--pr`, which brings its own) and the report says
+`no --base given; assuming main`. In `--json` that's `event.base_ref_source`:
+`flag`, `pr`, or `default`.
+
+An `--event` name GitHub doesn't have gets a warning on stderr, with the closest real
+name if there is one (`pul_request` gets "did you mean `pull_request`?"), and so does a
+`--type` on an event that has no activity types, like `push`.
+
 ### Feeding it changed files
 
 ```bash
@@ -128,8 +137,13 @@ wouldrun --diff main --head feature              # feature's committed changes, 
 wouldrun --pr 42                                 # gh pr view 42, in the target repo
 ```
 
+Paths given to `--changed` or `--changed-from` are relative to the repo root. A
+leading `./` is dropped, a leading `/` is dropped with a note on stderr, and on
+Windows a backslash becomes `/`, so `.\src\app.py` still matches `src/**`.
+
 `--diff` finds where the checked-out branch forked from BASE and lists what changed
-since, uncommitted edits included. `--head REF` diffs REF's committed tree instead,
+since: committed, uncommitted, and new files you haven't `git add`ed yet, leaving out
+anything `.gitignore` covers. `--head REF` diffs REF's committed tree instead,
 without checking it out. The Action uses that on `pull_request_target`, where the
 checkout is the base branch and the PR's files would otherwise never show up.
 
@@ -336,8 +350,9 @@ instead if you want even tags to stop moving.
   job list, and that's all the report says about it.
 - It is a static tool. It never pushes, opens a PR, or runs a workflow. The only
   programs it starts are read-only lookups, each with a fixed argument list and a 30 s
-  timeout: `git merge-base` and `git diff --name-only` for `--diff`, `git symbolic-ref
-  HEAD` for the `--ref` default, and `gh pr view` for `--pr`.
+  timeout: `git merge-base`, `git diff --name-only` and `git ls-files --others` for
+  `--diff`, `git symbolic-ref HEAD` for the `--ref` default, and `gh pr view` for
+  `--pr`.
 
 ## How it works
 

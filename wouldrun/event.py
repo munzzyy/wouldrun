@@ -11,6 +11,10 @@ from typing import List, Optional
 # reading a branch out of git for them and no point explaining the one we used.
 REF_EVENTS = frozenset({"push", "workflow_run"})
 
+# Events whose verdict turns on the PR's base branch.
+BASE_EVENTS = frozenset({"pull_request", "pull_request_target"})
+FALLBACK_BASE = "main"
+
 
 @dataclass
 class Event:
@@ -30,6 +34,8 @@ class Event:
     ref_source: str = "flag"
     # A changed-files source was given, so an empty list means nothing changed.
     changed_files_given: bool = False
+    # Where `base_ref` came from: "flag" (--base), "pr" (--pr), or "default".
+    base_ref_source: str = "flag"
 
 
 def classify_ref(ref: Optional[str]):

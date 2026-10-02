@@ -139,6 +139,23 @@ class GitDiff(unittest.TestCase):
         with self.assertRaises(GitDiffError):
             changed_files_from_diff("main", repo_root=str(root), head="no-such-branch-xyz")
 
+    def test_untracked_files_count_and_ignored_ones_do_not(self):
+        root = _make_git_repo()
+        (Path(root) / ".gitignore").write_text("*.log\n", encoding="utf-8")
+        _git(root, "add", ".gitignore")
+        _git(root, "commit", "-q", "-m", "ignore logs")
+        (Path(root) / "src" / "new.py").write_text("x = 1\n", encoding="utf-8")
+        (Path(root) / "build.log").write_text("noise\n", encoding="utf-8")
+        changed = changed_files_from_diff("HEAD", repo_root=str(root))
+        self.assertEqual(changed, ["src/new.py"])
+
+    def test_untracked_files_are_not_listed_twice_or_with_head(self):
+        root = self._two_branch_repo()
+        _git(root, "checkout", "-q", "feature")
+        (Path(root) / "src" / "new.py").write_text("x = 1\n", encoding="utf-8")
+        self.assertEqual(changed_files_from_diff("main", repo_root=str(root)), ["src/a.py", "src/new.py"])
+        self.assertEqual(changed_files_from_diff("main", repo_root=str(root), head="feature"), ["src/a.py"])
+
     def test_invalid_base_raises_clear_error_not_traceback(self):
         root = _make_git_repo()
         with self.assertRaises(GitDiffError):

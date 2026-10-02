@@ -57,6 +57,9 @@ _TYPED_EVENTS = frozenset(
     }
 )
 
+# Every event that takes `--type`, for the CLI's "--type is ignored" warning.
+TYPED_EVENTS = _TYPED_EVENTS | frozenset(_PR_DEFAULT_TYPES)
+
 
 @dataclass
 class WorkflowResult:
