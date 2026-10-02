@@ -281,6 +281,49 @@ job summary with a warning instead of failing the job.
 The `@v0.1.0` pin above is the current tagged release. Pin to a commit SHA
 instead if you want even tags to stop moving.
 
+### Gating a later job on the verdict
+
+The `workflow` input narrows the report to the workflows you name, one per line,
+matched the way `--workflow` matches them. A name that matches nothing fails the
+step. Three outputs carry the verdict to later jobs:
+
+- `fires`: `"true"` if at least one reported workflow would fire, else `"false"`
+- `fired-count`: how many would fire
+- `fired-workflows`: their paths, as a one-line JSON array
+
+All three are empty strings when the action skipped because there was no pull
+request to evaluate. This builds the end-to-end environment only when the e2e
+workflow is going to run:
+
+```yaml
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  wr:
+    runs-on: ubuntu-latest
+    outputs:
+      fires: ${{ steps.wouldrun.outputs.fires }}
+    steps:
+      - id: wouldrun
+        uses: munzzyy/wouldrun@<commit-sha>
+        with:
+          workflow: e2e.yml
+
+  e2e-env:
+    needs: wr
+    if: needs.wr.outputs.fires == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "build the e2e environment here"
+```
+
+The `workflow` input and the outputs are newer than v0.1.0, so until the next tag
+this needs a commit from `main`.
+
 ## What it checks
 
 - `on:` triggers in every shorthand: bare string, list, and mapping form.

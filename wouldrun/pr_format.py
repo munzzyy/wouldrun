@@ -9,6 +9,7 @@ see tests/test_pr_format.py.
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 
@@ -67,16 +68,36 @@ def format_markdown(payload: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def github_outputs(payload: dict) -> str:
+    """The Action's step outputs, as the `key=value` lines $GITHUB_OUTPUT takes."""
+    fired = [w.get("path", "") for w in payload.get("workflows") or [] if w.get("fires")]
+    return (
+        f"fires={'true' if fired else 'false'}\n"
+        f"fired-count={len(fired)}\n"
+        f"fired-workflows={json.dumps(fired, separators=(',', ':'))}\n"
+    )
+
+
 def main(argv=None) -> int:
     """Read a wouldrun --json payload from a file argument (or `-`/no
     argument for stdin) and print the markdown table to stdout."""
-    argv = sys.argv[1:] if argv is None else argv
-    if argv and argv[0] != "-":
-        with open(argv[0], "r", encoding="utf-8") as fh:
+    parser = argparse.ArgumentParser(prog="python -m wouldrun.pr_format")
+    parser.add_argument("report", nargs="?", default="-", help="wouldrun --json output (default: stdin)")
+    parser.add_argument(
+        "--github-output",
+        metavar="PATH",
+        help="also append fires, fired-count and fired-workflows to PATH ($GITHUB_OUTPUT)",
+    )
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    if args.report != "-":
+        with open(args.report, "r", encoding="utf-8") as fh:
             text = fh.read()
     else:
         text = sys.stdin.read()
     payload = json.loads(text)
+    if args.github_output:
+        with open(args.github_output, "a", encoding="utf-8") as fh:
+            fh.write(github_outputs(payload))
     sys.stdout.write(format_markdown(payload))
     return 0
 

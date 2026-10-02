@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from wouldrun.pr_format import MARKER, format_markdown, main
+from wouldrun.pr_format import MARKER, format_markdown, github_outputs, main
 
 
 def _payload(event=None, workflows=None):
@@ -164,6 +164,52 @@ class Main(unittest.TestCase):
         code, out = self._run_main([], stdin_text=json.dumps(_payload()))
         self.assertEqual(code, 0)
         self.assertIn(MARKER, out)
+
+
+class GithubOutputs(unittest.TestCase):
+    def _wf(self, path, fires):
+        return {"path": path, "name": None, "fires": fires, "reasons": [], "jobs": [], "called_by": [], "parse_error": None}
+
+    def test_something_fires(self):
+        payload = _payload(
+            workflows=[
+                self._wf(".github/workflows/ci.yml", True),
+                self._wf(".github/workflows/docs.yml", False),
+                self._wf(".github/workflows/e2e.yml", True),
+            ]
+        )
+        self.assertEqual(
+            github_outputs(payload),
+            "fires=true\n"
+            "fired-count=2\n"
+            'fired-workflows=[".github/workflows/ci.yml",".github/workflows/e2e.yml"]\n',
+        )
+
+    def test_nothing_fires(self):
+        payload = _payload(workflows=[self._wf(".github/workflows/docs.yml", False)])
+        self.assertEqual(github_outputs(payload), "fires=false\nfired-count=0\nfired-workflows=[]\n")
+
+    def test_odd_path_stays_on_one_line(self):
+        payload = _payload(workflows=[self._wf('.github/workflows/we\nird "x".yml', True)])
+        lines = github_outputs(payload).splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[2], 'fired-workflows=[".github/workflows/we\\nird \\"x\\".yml"]')
+
+    def test_main_appends_to_the_output_file_and_still_prints_markdown(self):
+        tmp = Path(tempfile.mkdtemp())
+        report = tmp / "wouldrun.json"
+        report.write_text(json.dumps(_payload(workflows=[self._wf(".github/workflows/ci.yml", True)])), encoding="utf-8")
+        output = tmp / "github_output"
+        output.write_text("skip=false\n", encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = main(["--github-output", str(output), str(report)])
+        self.assertEqual(code, 0)
+        self.assertTrue(out.getvalue().startswith(MARKER))
+        self.assertEqual(
+            output.read_text(encoding="utf-8"),
+            'skip=false\nfires=true\nfired-count=1\nfired-workflows=[".github/workflows/ci.yml"]\n',
+        )
 
 
 if __name__ == "__main__":

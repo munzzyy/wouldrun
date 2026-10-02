@@ -28,6 +28,24 @@ inputs:
     description: Python version used to run wouldrun.
     required: false
     default: "3.x"
+  workflow:
+    description: >-
+      Only report these workflows, one per line, each matched like the CLI's
+      --workflow (name, file name, stem, or path). A name that matches nothing
+      fails the step. Default "" reports every workflow.
+    required: false
+    default: ""
+
+outputs:
+  fires:
+    description: '"true" if at least one reported workflow would fire, "false" if none would. Empty when the action skipped.'
+    value: ${{ steps.report.outputs.fires }}
+  fired-count:
+    description: How many reported workflows would fire. Empty when the action skipped.
+    value: ${{ steps.report.outputs.fired-count }}
+  fired-workflows:
+    description: A one-line JSON array of the paths of the workflows that would fire. Empty when the action skipped.
+    value: ${{ steps.report.outputs.fired-workflows }}
 
 runs:
   using: composite
@@ -102,27 +120,38 @@ runs:
         BASE_REF: ${{ github.event.pull_request.base.ref }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         ACTIVITY_TYPE: ${{ github.event.action }}
+        WORKFLOWS: ${{ inputs.workflow }}
       run: |
         set -e
         head_args=()
         if [ "$EVENT_NAME" = "pull_request_target" ]; then
           head_args=(--head "$HEAD_SHA")
         fi
+        workflow_args=()
+        while IFS= read -r name; do
+          if [[ $name =~ [^[:space:]] ]]; then
+            workflow_args+=(--workflow "$name")
+          fi
+        done <<< "$WORKFLOWS"
         python3 -m wouldrun "$GITHUB_WORKSPACE" \
           --event "$EVENT_NAME" \
           --base "$BASE_REF" \
           --type "$ACTIVITY_TYPE" \
           --diff "origin/$BASE_REF" \
           "${head_args[@]}" \
+          "${workflow_args[@]}" \
           --json > "$RUNNER_TEMP/wouldrun.json"
 
-    - name: Format the report as markdown
+    - name: Format the report and set the outputs
+      id: report
       if: steps.guard.outputs.skip != 'true'
       shell: bash
       working-directory: ${{ runner.temp }}
       env:
         PYTHONPATH: ${{ github.action_path }}
-      run: python3 -m wouldrun.pr_format "$RUNNER_TEMP/wouldrun.json" > "$RUNNER_TEMP/wouldrun.md"
+      run: |
+        python3 -m wouldrun.pr_format --github-output "$GITHUB_OUTPUT" \
+          "$RUNNER_TEMP/wouldrun.json" > "$RUNNER_TEMP/wouldrun.md"
 
     - name: Write job summary
       if: steps.guard.outputs.skip != 'true' && inputs.post-comment != 'true'
