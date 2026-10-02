@@ -48,5 +48,5 @@ Include what you found, how to reproduce it, and the impact you would expect.
 
 ## Supported versions
 
-v0.1.0 is the only tagged release so far. Fixes land on `main` and go out with
+v0.2.0 is the current tagged release. Fixes land on `main` and go out with
 the next tag, so run `main` if you need a fix before then.

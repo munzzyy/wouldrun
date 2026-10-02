@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wouldrun"
-version = "0.1.0"
+version = "0.2.0"
 description = "Work out which GitHub Actions workflows and jobs a change would trigger, without pushing or running act."
 readme = "README.md"
 license = "GPL-3.0-or-later"

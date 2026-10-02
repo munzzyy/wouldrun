@@ -257,7 +257,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: munzzyy/wouldrun@v0.1.0
+      - uses: munzzyy/wouldrun@v0.2.0
 ```
 
 Posting that same table as a PR comment is opt-in, `post-comment: "true"`, and
@@ -274,7 +274,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: munzzyy/wouldrun@v0.1.0
+      - uses: munzzyy/wouldrun@v0.2.0
         with:
           post-comment: "true"
 ```
@@ -290,7 +290,7 @@ marker into your own comment does not make it a target. A `pull_request` run fro
 a fork gets a read-only token and cannot comment at all; the table goes to the
 job summary with a warning instead of failing the job.
 
-The `@v0.1.0` pin above is the current tagged release. Pin to a commit SHA
+The `@v0.2.0` pin above is the current tagged release. Pin to a commit SHA
 instead if you want even tags to stop moving.
 
 ### Gating a later job on the verdict
@@ -334,8 +334,7 @@ jobs:
       - run: echo "build the e2e environment here"
 ```
 
-The `workflow` input and the outputs are newer than v0.1.0, so until the next tag
-this needs a commit from `main`.
+The `workflow` input and the outputs arrived in v0.2.0.
 
 ## What it checks
 
@@ -444,9 +443,6 @@ above.
 What is left needs a person rather than more code: a release, a run on GitHub's own
 runners, and two decisions for the maintainer.
 
-- A v0.2.0 release. The Unreleased part of [CHANGELOG.md](CHANGELOG.md) is on `main`
-  but in no tag, so the `@v0.1.0` pins in this README have none of it. Cutting it means
-  a version bump, a tag and a GitHub Release, and then moving those pins.
 - A live run of the two Action paths that cannot run here: a `pull_request_target`
   workflow, and `post-comment: "true"` on a pull request from a fork. Both are tested
   locally with stubbed API calls and with the bash steps run by hand against a scratch

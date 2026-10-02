@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] (2026-10-02)
+
 - `workflow_run` triggers check their `workflows:` list against the new
   `--triggering-workflow NAME`. A missing list or no name to check reports SKIPPED
   instead of a guessed FIRES.
@@ -59,5 +61,6 @@ First tagged release, under the MIT license.
 - A composite GitHub Action that writes the table to the job summary or, opt-in, to a
   sticky PR comment.
 
-[Unreleased]: https://github.com/munzzyy/wouldrun/compare/v0.1.0...main
+[Unreleased]: https://github.com/munzzyy/wouldrun/compare/v0.2.0...main
+[0.2.0]: https://github.com/munzzyy/wouldrun/tree/v0.2.0
 [0.1.0]: https://github.com/munzzyy/wouldrun/tree/v0.1.0
