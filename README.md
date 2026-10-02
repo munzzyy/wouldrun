@@ -120,7 +120,8 @@ information as `event.ref_source`: `flag`, `git`, or `default`.
 A `pull_request` or `pull_request_target` run works the same way for the base
 branch: leave `--base` off (and `--pr`, which brings its own) and the report says
 `no --base given; assuming main`. In `--json` that's `event.base_ref_source`:
-`flag`, `pr`, or `default`.
+`flag`, `pr`, or `default`. Other events have no base, so with no `--base` both
+fields are `null`.
 
 An `--event` name GitHub doesn't have gets a warning on stderr, with the closest real
 name if there is one (`pul_request` gets "did you mean `pull_request`?"), and so does a

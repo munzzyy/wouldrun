@@ -488,6 +488,16 @@ class BaseBranchSource(unittest.TestCase):
         _, out, _ = _run([str(root), "--event", "push", "--ref", "main", "--no-color"])
         self.assertNotIn("no --base given", out)
 
+    def test_events_without_a_base_keep_it_null_in_json(self):
+        root = workflow_repo("ci.yml", self.TEXT)
+        for event_name in ("push", "issues", "workflow_dispatch"):
+            _, out, _ = _run([str(root), "--event", event_name, "--ref", "main", "--json"])
+            event = json.loads(out)["event"]
+            self.assertEqual((event["base_ref"], event["base_ref_source"]), (None, None), event_name)
+        _, out, _ = _run([str(root), "--event", "push", "--ref", "main", "--base", "dev", "--json"])
+        event = json.loads(out)["event"]
+        self.assertEqual((event["base_ref"], event["base_ref_source"]), ("dev", "flag"))
+
 
 class EventNameWarnings(unittest.TestCase):
     def _root(self):

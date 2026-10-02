@@ -20,6 +20,7 @@
   they also turn backslashes into `/`.
 - A `pull_request` run without `--base` says it assumed `main`. JSON `event.base_ref` is
   the base that was used and the new `event.base_ref_source` says where it came from.
+  Both stay `null` for other events when no `--base` is given.
 - An unknown `--event` gets a warning naming the closest real event. So does `--type`
   on an event that has no activity types.
 - `--diff` also counts untracked files that `.gitignore` does not cover.

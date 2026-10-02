@@ -9,7 +9,7 @@ import sys
 
 from . import __version__
 from .discover import discover
-from .event import FALLBACK_BASE, REF_EVENTS, Event
+from .event import BASE_EVENTS, FALLBACK_BASE, REF_EVENTS, Event
 from .evaluate import TYPED_EVENTS, evaluate_all
 from .gitdiff import GitDiffError, changed_files_from_diff, current_ref
 from .prlookup import PrLookupError, pr_info
@@ -313,8 +313,10 @@ def main(argv=None) -> int:
         base_ref, base_ref_source = args.base_ref, "flag"
     elif pr_base_ref is not None:
         base_ref, base_ref_source = pr_base_ref, "pr"
-    else:
+    elif event_name in BASE_EVENTS:
         base_ref, base_ref_source = FALLBACK_BASE, "default"
+    else:
+        base_ref, base_ref_source = None, None
     ref, ref_source = _resolve_ref(args, event_name)
     event = Event(
         name=event_name,

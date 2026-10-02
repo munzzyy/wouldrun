@@ -34,8 +34,9 @@ class Event:
     ref_source: str = "flag"
     # A changed-files source was given, so an empty list means nothing changed.
     changed_files_given: bool = False
-    # Where `base_ref` came from: "flag" (--base), "pr" (--pr), or "default".
-    base_ref_source: str = "flag"
+    # Where `base_ref` came from: "flag" (--base), "pr" (--pr), "default", or
+    # None when no base was given for an event that has none.
+    base_ref_source: Optional[str] = "flag"
 
 
 def classify_ref(ref: Optional[str]):
