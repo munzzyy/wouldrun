@@ -1,5 +1,6 @@
 """Tests for wouldrun.discover: finding and loading workflow files."""
 
+import os
 import unittest
 
 from wouldrun.discover import discover
@@ -73,3 +74,23 @@ class Discover(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Symlinks(unittest.TestCase):
+    def test_a_symlinked_workflow_is_reported_and_its_target_never_quoted(self):
+        import tempfile
+        from wouldrun.discover import discover
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as outside:
+            secret = os.path.join(outside, "environ")
+            with open(secret, "w", encoding="utf-8") as fh:
+                fh.write("DEMO_TOKEN=visible-if-leaked\n")
+            wf = os.path.join(root, ".github", "workflows")
+            os.makedirs(wf)
+            try:
+                os.symlink(secret, os.path.join(wf, "leak.yml"))
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable here")
+            found = discover(root)
+            self.assertEqual([w.path for w in found], [".github/workflows/leak.yml"])
+            self.assertIn("symbolic link", found[0].parse_error or "")
+            self.assertNotIn("visible-if-leaked", repr(vars(found[0])))

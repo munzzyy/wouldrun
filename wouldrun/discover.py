@@ -23,9 +23,15 @@ def discover(root: str) -> list:
         if not (entry.endswith(".yml") or entry.endswith(".yaml")):
             continue
         full = os.path.join(workflows_dir, entry)
+        rel = "/".join([".github", "workflows", entry])
+        # A symlink can point anywhere, /proc/self/environ included, and a
+        # parse error quotes the first line it could not place. GitHub does
+        # not run symlinked workflows either, so there is nothing to lose.
+        if os.path.islink(full):
+            out.append(Workflow.broken(rel, "is a symbolic link; not followed"))
+            continue
         if not os.path.isfile(full):
             continue
-        rel = "/".join([".github", "workflows", entry])
         try:
             size = os.path.getsize(full)
             if size > MAX_FILE_BYTES:
