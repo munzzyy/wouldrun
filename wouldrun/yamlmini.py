@@ -521,7 +521,11 @@ def _coerce_scalar(token):
     if token in ("false", "False", "FALSE"):
         return False
     if _INT_RE.match(token):
-        return int(token)
+        try:
+            return int(token)
+        except ValueError:
+            # Past sys.get_int_max_str_digits() (4300 by default) int() refuses the text.
+            return token
     if _FLOAT_RE.match(token):
         return float(token)
     return token

@@ -229,6 +229,15 @@ class Malformed(unittest.TestCase):
         self.assertEqual(doc["key1999"]["a"], 1999)
 
 
+class LongIntegers(unittest.TestCase):
+    def test_integer_too_long_for_int_stays_text(self):
+        digits = "9" * 5000
+        self.assertEqual(load("x: " + digits + "\ny: [" + digits + "]\n"), {"x": digits, "y": [digits]})
+
+    def test_ordinary_integers_still_load_as_ints(self):
+        self.assertEqual(load("x: 4300\ny: -12\n"), {"x": 4300, "y": -12})
+
+
 class AnchorsAndAliases(unittest.TestCase):
     def test_flow_list_anchor_reused_by_alias(self):
         doc = load("on:\n  push:\n    paths: &src ['src/**']\n  pull_request:\n    paths: *src\n")

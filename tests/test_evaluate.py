@@ -865,6 +865,14 @@ class MalformedGlobDoesNotCrashEvaluation(unittest.TestCase):
         self.assertTrue(by_path[".github/workflows/ok.yml"].fires)
 
 
+class LongIntegerScalar(unittest.TestCase):
+    def test_a_5000_digit_number_does_not_take_down_the_run(self):
+        text = "on: push\nenv:\n  N: " + "9" * 5000 + "\njobs:\n  b:\n    runs-on: u\n"
+        r = _run(text, Event(name="push", ref="refs/heads/main"))
+        self.assertIsNone(r.workflow.parse_error)
+        self.assertTrue(r.fires)
+
+
 class AnchorsAndAliases(unittest.TestCase):
     def test_aliased_paths_list_fires_for_both_events(self):
         text = (
