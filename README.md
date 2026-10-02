@@ -150,12 +150,20 @@ requires `workflows:` for a `workflow_run` trigger to ever run at all, so leavin
 ### In CI
 
 The composite Action further down is the shortest path. To run the CLI yourself,
-install it from git at a commit you chose:
+install it from git at a commit you chose. `--diff` needs the base branch's history,
+hence `fetch-depth: 0`, and the base ref goes in through `env:` rather than being
+pasted into the script:
 
 ```yaml
-- run: |
+- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  with:
+    fetch-depth: 0
+    persist-credentials: false
+- env:
+    BASE_REF: ${{ github.base_ref }}
+  run: |
     pipx run --spec "git+https://github.com/munzzyy/wouldrun@<commit-sha>" \
-      wouldrun --diff "origin/${{ github.base_ref }}" --exit-fires
+      wouldrun --diff "origin/$BASE_REF" --exit-fires
 ```
 
 `--exit-fires` makes the exit code reflect the verdict (0 if at least one workflow would
@@ -171,9 +179,15 @@ workflow: is the expensive end-to-end suite going to fire, so is it worth buildi
 the environment for it? `--workflow` asks that, and scopes `--exit-fires` to it:
 
 ```yaml
-- run: |
+- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  with:
+    fetch-depth: 0
+    persist-credentials: false
+- env:
+    BASE_REF: ${{ github.base_ref }}
+  run: |
     pipx run --spec "git+https://github.com/munzzyy/wouldrun@<commit-sha>" \
-      wouldrun --diff "origin/${{ github.base_ref }}" --workflow e2e.yml --exit-fires
+      wouldrun --diff "origin/$BASE_REF" --workflow e2e.yml --exit-fires
 ```
 
 It matches a workflow's `name:`, its file name (`e2e.yml`), its stem (`e2e`), or its
@@ -306,11 +320,12 @@ instead if you want even tags to stop moving.
   `steps:`, so step-level `uses:` (an action reference) and `if:` are invisible to it.
 - It resolves `workflow_call` only for same-repo paths, written either way:
   `./.github/workflows/*` or the newer `$/.github/workflows/*`. A call into another
-  repo's reusable workflow is reported by name but not followed.
-- It is a static tool. It never pushes, opens a PR, or runs anything. Its only
-  subprocesses are two read-only git commands, each with a fixed argument list:
-  `git diff --name-only` for `--diff`, and `git symbolic-ref HEAD` for the `--ref`
-  default.
+  repo's reusable workflow is not followed. The calling job still shows up in the
+  job list, and that's all the report says about it.
+- It is a static tool. It never pushes, opens a PR, or runs a workflow. The only
+  programs it starts are read-only lookups, each with a fixed argument list and a 30 s
+  timeout: `git merge-base` and `git diff --name-only` for `--diff`, `git symbolic-ref
+  HEAD` for the `--ref` default, and `gh pr view` for `--pr`.
 
 ## How it works
 
@@ -329,10 +344,10 @@ filter-pattern glob syntax with a linear reach-set sweep over a compiled token l
 not a translated regex: a regex where every `*` becomes `[^/]*` is ambiguous enough
 that a pattern a workflow file is allowed to contain sends Python's engine into
 catastrophic backtracking. `wouldrun/evaluate.py` is the trigger-matching engine
-described above. Nothing here calls a model, makes a network request, or writes
-anything. It shells out in exactly two places, both a fixed `argv` list and never a
-shell string: `git diff --name-only` for `--diff`, and `git symbolic-ref HEAD` to
-read the current branch when you don't pass `--ref`.
+described above. Nothing here calls a model or writes anything. `--pr` is the only
+thing that touches the network, through `gh pr view`; everything else reads local
+files and the local git repo. Every subprocess is a fixed `argv` list, never a shell
+string, and the full list is in "What it does not do" above.
 
 ## Contributing
 

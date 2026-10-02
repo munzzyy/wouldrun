@@ -3,13 +3,15 @@
 wouldrun statically evaluates GitHub Actions workflow files: which workflows
 would fire for a given push, PR, or set of changed paths. It parses YAML with
 a safe loader, resolves triggers and filters, and prints its verdicts. It
-never executes a workflow and never talks to the network.
+never executes a workflow. The only time it talks to the network is `--pr`,
+which asks `gh pr view` for a pull request's base branch and changed files.
 
-It does shell out, in two places, both read-only and both a fixed `argv` list
-rather than a shell string: `git diff --name-only` when you pass `--diff`, and
-`git symbolic-ref HEAD` to read the current branch when you leave `--ref` off.
-A base ref starting with `-` is rejected before it reaches git, so a crafted
-`--diff` value cannot smuggle in a flag, and both calls time out after 30s.
+It does shell out, always read-only and always with a fixed `argv` list rather
+than a shell string: `git merge-base` and `git diff --name-only` when you pass
+`--diff`, `git symbolic-ref HEAD` to read the current branch when you leave
+`--ref` off, and `gh pr view` when you pass `--pr`. A base ref starting with
+`-` is rejected before it reaches git, so a crafted `--diff` value cannot
+smuggle in a flag, and every call times out after 30s.
 
 Workflow files are still input someone else may have written. A workflow
 crafted to crash the evaluator, to hang it (pathological globs or YAML), or to
@@ -40,5 +42,5 @@ Include what you found, how to reproduce it, and the impact you'd expect.
 
 ## Supported versions
 
-There is no tagged release yet. Fixes land on `main`, and that is the only
-version anyone should be running.
+v0.1.0 is the only tagged release so far. Fixes land on `main` and go out with
+the next tag, so run `main` if you need a fix before then.
