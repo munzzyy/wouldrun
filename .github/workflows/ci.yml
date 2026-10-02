@@ -38,7 +38,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Test the sticky-comment script (Node's built-in runner, no npm)
-        run: node --test tests/js/
+        run: node --test tests/js/*.test.js
 
   action:
     # Commits go straight to main, so this first runs on the next PR.

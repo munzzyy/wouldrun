@@ -521,11 +521,12 @@ def _coerce_scalar(token):
     if token in ("false", "False", "FALSE"):
         return False
     if _INT_RE.match(token):
-        try:
-            return int(token)
-        except ValueError:
-            # Past sys.get_int_max_str_digits() (4300 by default) int() refuses the text.
+        # Interpreters before the 4300-digit limit (3.9.13 and older on some
+        # runners) would happily build the bignum, so the cap is ours, not
+        # int()'s; nothing in a workflow is a 4300-digit number.
+        if len(token.lstrip("+-")) > 4300:
             return token
+        return int(token)
     if _FLOAT_RE.match(token):
         return float(token)
     return token
