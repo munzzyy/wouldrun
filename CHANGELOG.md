@@ -12,6 +12,9 @@
   and jobs. A `<<` merge key is a parse error, as it is on GitHub. So is a file whose
   aliases would add more than two million characters once copied out.
 - A number too long for Python's `int()` stays text instead of crashing the whole run.
+- The YAML reader reads values that span lines or start on the line below their key,
+  flow mappings as list items and headers like `|2-`. A multi-line `if:` used to drop
+  every job after it. A line it cannot place is now a parse error naming the line.
 - `--exit-fires` exits 2 when nothing fires but a workflow in scope failed to parse or
   evaluate and names that workflow on stderr. JSON workflows get an `undetermined` field.
 - `repository_dispatch` honors `types:` with `--type` standing in for the `event_type`.

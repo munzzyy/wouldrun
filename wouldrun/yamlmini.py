@@ -20,14 +20,18 @@ Supported: block and flow mappings, block and flow sequences, single- and
 double-quoted scalars, plain scalars, `|`/`>` block scalars (consumed and
 kept as opaque text, since wouldrun never needs step/run bodies), comments,
 anchors and aliases (`&name` / `*name`), and a single leading `---` /
-trailing `...` document marker. An alias returns the same object its anchor
-built, never a copy, but anything that later walks the document still sees
-every alias copied out. So each alias is charged the expanded size of what it
-points at, and a file whose aliases add up past MAX_ALIAS_EXPANSION is a
-YamlError, like a file over MAX_BYTES. Merge keys (`<<: *name`) are rejected
-with a YamlError because GitHub rejects them too. Not supported: multi-document
-streams and tag annotations (`!!str` and friends are kept as part of the scalar
-text). Neither appears in the trigger and job metadata this tool reads.
+trailing `...` document marker. Plain and quoted scalars may run over several
+lines, and a value may start on the line after its key. A line the parse
+does not use is a YamlError naming that line, never a silent truncation.
+
+An alias returns the same object its anchor built, never a copy, but
+anything that later walks the document still sees every alias copied out. So
+each alias is charged the expanded size of what it points at, and a file
+whose aliases add up past MAX_ALIAS_EXPANSION is a YamlError, like a file
+over MAX_BYTES. Merge keys (`<<: *name`) are rejected with a YamlError because
+GitHub rejects them too. Not supported: multi-document streams and tag
+annotations (`!!str` and friends are kept as part of the scalar text). Neither
+appears in the trigger and job metadata this tool reads.
 """
 
 from __future__ import annotations
@@ -39,7 +43,7 @@ MAX_LINES = 20000
 MAX_DEPTH = 200  # nesting levels; real workflow files never get close
 MAX_ALIAS_EXPANSION = MAX_BYTES  # characters plus one per node, summed over every alias
 
-_BLOCK_SCALAR_RE = re.compile(r"^[|>][+-]?\d*$")
+_BLOCK_SCALAR_RE = re.compile(r"^[|>](?:[+-]?(\d?)|(\d)[+-])$")
 _INT_RE = re.compile(r"^[-+]?[0-9]+$")
 _FLOAT_RE = re.compile(r"^[-+]?(\d+\.\d*|\.\d+|\d+[eE][-+]?\d+|\d+\.\d*[eE][-+]?\d+)$")
 _ANCHOR_RE = re.compile(r"^&([^\s,\[\]{}]+)(?:\s+|$)")
@@ -61,7 +65,8 @@ def load(text: str):
     if len(lines) > MAX_LINES:
         raise YamlError(f"input exceeds {MAX_LINES} line cap")
     parser = _Parser(lines)
-    value, _ = parser.parse_block(0, 0)
+    value, end = parser.parse_block(0, 0, scalar_ok=False)
+    parser.check_consumed(end)
     return value
 
 
@@ -73,26 +78,40 @@ class _Parser:
         self.anchors = {}
         self._sizes = {}  # id -> (object, expanded size); holding the object keeps the id unique
         self._expanded = 0
+        self._first = 0
         self._trim_document_markers()
 
     def _trim_document_markers(self):
-        # A lone "---" opens a document; a lone "..." ends it. wouldrun only
-        # ever reads the first document in a workflow file.
+        # "---" opens a document and "..." ends it, both only at column 0.
+        # wouldrun only ever reads the first document in a workflow file.
         end = self.n
         start = 0
         for i, line in enumerate(self.lines):
-            stripped = line.strip()
-            if stripped == "":
+            if self._is_blank_or_comment(line):
                 continue
-            if stripped == "---":
+            if _strip_comment(line).rstrip() == "---":
                 start = i + 1
             break
         for i in range(start, self.n):
-            if self.lines[i].strip() == "...":
+            if _strip_comment(self.lines[i]).rstrip() == "...":
                 end = i
                 break
         self.lines = self.lines[start:end]
         self.n = len(self.lines)
+        self._first = start
+
+    def _line_no(self, idx):
+        return idx + self._first + 1
+
+    def check_consumed(self, idx):
+        left = self._next_real(idx)
+        if left is not None:
+            text = self.lines[left].strip()
+            if len(text) > 60:
+                text = text[:57] + "..."
+            raise YamlError(
+                f"line {self._line_no(left)}: {text!r} does not fit where it is (check its indentation)"
+            )
 
     # -- low-level line helpers -------------------------------------------------
 
@@ -117,7 +136,7 @@ class _Parser:
 
     # -- block parsing ------------------------------------------------------
 
-    def parse_block(self, idx, min_indent):
+    def parse_block(self, idx, min_indent, scalar_ok=True):
         # Every recursive descent -- from _parse_mapping, _parse_sequence,
         # and _parse_mapping_continuation alike -- funnels back through this
         # one method, so it is the single place to cap how deep the mutual
@@ -137,6 +156,17 @@ class _Parser:
             content = self._content(i)
             if content == "-" or content.startswith("- "):
                 return self._parse_sequence(i, indent)
+            if scalar_ok:
+                # A value on the line after its key: `run:` then the command.
+                anchor, rest = _split_anchor(content)
+                if rest[:1] in ("[", "{") or _split_key_value(content) is None:
+                    if rest:
+                        value, next_i = self._value_on_line(rest, i, min_indent - 1)
+                    else:
+                        value, next_i = self.parse_block(i + 1, min_indent)
+                    if anchor is not None:
+                        self.anchors[anchor] = value
+                    return value, next_i
             return self._parse_mapping(i, indent)
         finally:
             self._depth -= 1
@@ -183,10 +213,8 @@ class _Parser:
                 seq = self._indentless_sequence(next_i, indent)
                 if seq is not None:
                     value, next_i = seq
-        elif _BLOCK_SCALAR_RE.match(rest):
-            value, next_i = self._consume_block_scalar(real, indent)
         else:
-            value, next_i = self._flow_value(rest, real)
+            value, next_i = self._value_on_line(rest, real, indent)
         if anchor is not None:
             self.anchors[anchor] = value
         return value, next_i
@@ -258,7 +286,7 @@ class _Parser:
                 result.append(value)
                 i = next_i
                 continue
-            split = _split_key_value(rest)
+            split = None if rest[0] in "[{" else _split_key_value(rest)
             if split is not None:
                 key = self._key(split[0], rest)
                 if anchor is not None:
@@ -269,10 +297,7 @@ class _Parser:
                 result.append(more)
                 i = next_i
             else:
-                if _BLOCK_SCALAR_RE.match(rest):
-                    value, next_i = self._consume_block_scalar_at(real, item_indent, rest)
-                else:
-                    value, next_i = self._flow_value(rest, real)
+                value, next_i = self._value_on_line(rest, real, indent)
                 if anchor is not None:
                     self.anchors[anchor] = value
                 result.append(value)
@@ -300,21 +325,23 @@ class _Parser:
             i = next_i
         return mapping, i
 
-    def _consume_block_scalar(self, key_line_idx, key_indent):
-        return self._consume_block_scalar_at(key_line_idx, key_indent, None)
-
-    def _consume_block_scalar_at(self, key_line_idx, key_indent, _marker):
-        j = key_line_idx + 1
+    def _consume_block_scalar(self, header_idx, parent_indent, header):
+        """`parent_indent` is the indent of the mapping or sequence holding
+        the scalar; an explicit indentation indicator counts from there."""
+        j = header_idx + 1
         content_indent = None
+        digit = header.group(1) or header.group(2)
         first = j
         while first < self.n and self.lines[first].strip() == "":
             first += 1
-        if first < self.n:
+        if digit and digit != "0":
+            content_indent = max(parent_indent, 0) + int(digit)
+        elif first < self.n:
             candidate = self._indent_of(self.lines[first])
-            if candidate > key_indent:
+            if candidate > parent_indent:
                 content_indent = candidate
         if content_indent is None:
-            return "", key_line_idx + 1
+            return "", header_idx + 1
         out = []
         i = j
         last_content = j
@@ -355,19 +382,79 @@ class _Parser:
             return self._parse_sequence(seq_i, indent)
         return None
 
-    def _flow_value(self, rest, real):
-        """Resolve a scalar or flow value that starts with `rest` on line
-        `real`. A flow collection (`[...]` / `{...}`) may span several
-        physical lines, so gather following lines until its brackets balance
-        before parsing. Returns (value, next_line_index)."""
-        if rest and rest[0] in "[{":
+    def _value_on_line(self, rest, real, parent_indent):
+        """Resolve a non-empty value that starts with `rest` on line `real`,
+        inside a mapping or sequence at `parent_indent`. Flow collections,
+        quoted scalars and plain scalars may all continue on later lines.
+        Returns (value, next_line_index)."""
+        header = _BLOCK_SCALAR_RE.match(rest)
+        if header:
+            return self._consume_block_scalar(real, parent_indent, header)
+        if rest[0] in "[{":
             text, end = self._gather_flow(rest, real)
             return _FlowParser(text, self).parse(), end + 1
-        if rest.startswith("*"):
+        if rest[0] == "*":
             if not _ALIAS_RE.match(rest):
                 raise YamlError(f"malformed alias: {rest!r}")
             return self._alias(rest), real + 1
-        return _coerce_scalar(rest), real + 1
+        if rest[0] in ("'", '"'):
+            if _quote_end(rest, 1) < 0:
+                return self._multiline_quoted(rest, real)
+            return _coerce_scalar(rest), real + 1
+        return self._plain(rest, real, parent_indent)
+
+    def _plain(self, rest, real, parent_indent):
+        """A plain scalar folds in every following line indented deeper than
+        its parent, with a blank line kept as a newline (YAML's line folding)."""
+        first = self.lines[real]
+        if len(_strip_comment(first)) < len(first):
+            return _coerce_scalar(rest), real + 1
+        parts = [rest]
+        blanks = 0
+        last = real
+        i = real + 1
+        while i < self.n:
+            line = self.lines[i]
+            text = line.strip()
+            if not text:
+                blanks += 1
+                i += 1
+                continue
+            if text.startswith("#") or self._indent_of(line) <= parent_indent:
+                break
+            body = _strip_comment(line)
+            text = body.strip()
+            if ": " in text or text.endswith(":"):
+                raise YamlError(
+                    f"line {self._line_no(i)}: a key inside a multi-line value (check its indentation)"
+                )
+            parts.append("\n" * blanks if blanks else " ")
+            parts.append(text)
+            blanks = 0
+            last = i
+            i += 1
+            if len(body) < len(line):
+                break
+        if last == real:
+            return _coerce_scalar(rest), real + 1
+        return "".join(parts), last + 1
+
+    def _multiline_quoted(self, rest, real):
+        """`rest` opens a quoted scalar that does not close on its own line.
+        Join lines up to the closing quote, folded the way YAML folds them."""
+        quote = rest[0]
+        segments = [rest[1:]]
+        for i in range(real + 1, self.n):
+            line = self.lines[i]
+            end = _quote_end(line, 0, quote)
+            if end < 0:
+                segments.append(line)
+                continue
+            if _strip_comment(line[end + 1 :]).strip():
+                raise YamlError(f"line {self._line_no(i)}: text after the closing quote")
+            segments.append(line[:end])
+            return _fold_quoted(segments, quote), i + 1
+        raise YamlError(f"line {self._line_no(real)}: quoted value is never closed")
 
     def _gather_flow(self, rest, line_idx):
         """`rest` opens a flow collection. If its brackets don't close on this
@@ -412,6 +499,64 @@ def _flow_depth(text):
                 depth -= 1
         i += 1
     return depth
+
+
+def _quote_end(text, start, quote=None):
+    """Index of the quote that closes a scalar opened at text[start - 1],
+    or -1 if it does not close in `text`. Pass `quote` when the opening
+    quote is on an earlier line."""
+    if quote is None:
+        quote = text[start - 1]
+    i = start
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if quote == "'":
+            if c == "'":
+                if i + 1 < n and text[i + 1] == "'":
+                    i += 2
+                    continue
+                return i
+        elif c == "\\":
+            i += 2
+            continue
+        elif c == '"':
+            return i
+        i += 1
+    return -1
+
+
+def _fold_quoted(segments, quote):
+    """Fold the lines of a multi-line quoted scalar: a line break becomes a
+    space, each blank line a newline, and a double-quoted line ending in an
+    unescaped backslash joins the next line with nothing between them."""
+    last = len(segments) - 1
+    pieces = []
+    for k, seg in enumerate(segments):
+        if k > 0:
+            seg = seg.lstrip(" \t")
+        if k < last:
+            seg = seg.rstrip(" \t")
+        pieces.append(seg)
+    out = []
+    blanks = 0
+    escaped = False
+    for k, piece in enumerate(pieces):
+        if 0 < k < last and piece == "":
+            blanks += 1
+            continue
+        if k > 0:
+            out.append("\n" * blanks if blanks else ("" if escaped else " "))
+        blanks = 0
+        escaped = False
+        if quote == '"' and k < last and (len(piece) - len(piece.rstrip("\\"))) % 2 == 1:
+            piece = piece[:-1]
+            escaped = True
+        out.append(piece)
+    text = "".join(out)
+    if quote == '"':
+        return _unescape_double(text)
+    return text.replace("''", "'")
 
 
 def _strip_comment(line):
@@ -649,6 +794,7 @@ class _FlowParser:
             self._ws()
             if self.i < self.n and self.s[self.i] == ",":
                 self.i += 1
+                self._ws()
                 if self.i < self.n and self.s[self.i] == "}":
                     self.i += 1
                     return out

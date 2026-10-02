@@ -142,6 +142,24 @@ class FlowCollections(unittest.TestCase):
         doc = load("x: {\n  a: 1,\n  b: 2\n}\ny: 3\n")
         self.assertEqual(doc, {"x": {"a": 1, "b": 2}, "y": 3})
 
+    def test_flow_mapping_trailing_comma_before_a_space(self):
+        self.assertEqual(load("x: { a: 1, }\n"), {"x": {"a": 1}})
+
+    def test_flow_mapping_as_a_sequence_item_spanning_lines(self):
+        text = (
+            "include:\n"
+            "  - { os: { name: MacOS },\n"
+            "      arch: { tag: i386 } }\n"
+            "  - { os: linux, arch: amd64 }\n"
+            "next: 1\n"
+        )
+        doc = load(text)
+        self.assertEqual(
+            doc["include"],
+            [{"os": {"name": "MacOS"}, "arch": {"tag": "i386"}}, {"os": "linux", "arch": "amd64"}],
+        )
+        self.assertEqual(doc["next"], 1)
+
     def test_unterminated_flow_sequence_raises(self):
         # An unterminated flow collection must be a loud parse error, not a
         # silent truncation of the rest of the value.
@@ -168,6 +186,29 @@ class BlockScalars(unittest.TestCase):
         self.assertEqual(doc["b"], 2)
         self.assertIn("line one", doc["a"])
 
+    def test_indentation_and_chomping_indicators_in_either_order(self):
+        for header in ("|2-", "|-2", ">2", ">+", "|2+", ">-"):
+            with self.subTest(header=header):
+                text = f"a:\n  run: {header}\n    first\n    second\n  b: 2\n"
+                doc = load(text)
+                self.assertEqual(doc["a"]["b"], 2)
+                self.assertEqual(doc["a"]["run"], "first\nsecond")
+
+    def test_explicit_indentation_keeps_a_more_indented_first_line(self):
+        doc = load("a: |2\n    first\n  second\nb: 2\n")
+        self.assertEqual(doc["a"], "  first\nsecond")
+        self.assertEqual(doc["b"], 2)
+
+    def test_sequence_item_block_scalar_indented_like_the_item(self):
+        doc = load("steps:\n  - |\n    echo one\n  - two\n")
+        self.assertEqual(doc["steps"], ["echo one", "two"])
+
+    def test_indented_dots_inside_a_block_scalar_do_not_end_the_document(self):
+        text = "a:\n  run: |\n    echo\n    ...\n  b: 2\nc: 3\n"
+        doc = load(text)
+        self.assertEqual(doc["a"]["b"], 2)
+        self.assertEqual(doc["c"], 3)
+
 
 class DocumentMarkers(unittest.TestCase):
     def test_leading_triple_dash(self):
@@ -175,6 +216,12 @@ class DocumentMarkers(unittest.TestCase):
 
     def test_trailing_dotdotdot(self):
         self.assertEqual(load("x: 1\n...\ny: 2\n"), {"x": 1})
+
+    def test_leading_triple_dash_with_a_comment(self):
+        self.assertEqual(load("--- # workflow\nx: 1\n"), {"x": 1})
+
+    def test_comments_before_the_triple_dash(self):
+        self.assertEqual(load("# license header\n\n---\nx: 1\n"), {"x": 1})
 
 
 class Malformed(unittest.TestCase):
@@ -227,6 +274,114 @@ class Malformed(unittest.TestCase):
         doc = load(text)
         self.assertEqual(len(doc), 2000)
         self.assertEqual(doc["key1999"]["a"], 1999)
+
+
+class MultiLineScalars(unittest.TestCase):
+    def test_plain_scalar_folds_a_more_indented_line(self):
+        self.assertEqual(load("env:\n  MSG: hello\n    world\n  B: 2\n"), {"env": {"MSG": "hello world", "B": 2}})
+
+    def test_plain_scalar_keeps_a_blank_line_as_a_newline(self):
+        self.assertEqual(load("a: one\n  two\n\n  three\nb: 2\n"), {"a": "one two\nthree", "b": 2})
+
+    def test_plain_scalar_in_a_sequence_item(self):
+        self.assertEqual(load("x:\n  - one\n    two\n  - three\n"), {"x": ["one two", "three"]})
+
+    def test_plain_scalar_under_a_sequence_item_key(self):
+        doc = load("steps:\n  - if: a &&\n      b\n    run: c\n")
+        self.assertEqual(doc["steps"], [{"if": "a && b", "run": "c"}])
+
+    def test_a_comment_ends_a_plain_scalar(self):
+        with self.assertRaises(YamlError):
+            load("a: one # note\n  two\n")
+
+    def test_a_key_inside_a_folded_line_is_an_error(self):
+        with self.assertRaises(YamlError) as ctx:
+            load("a:\n  b: one\n    c: two\n")
+        self.assertIn("line 3", str(ctx.exception))
+
+    def test_double_quoted_scalar_over_two_lines(self):
+        self.assertEqual(load('description: "a --\n  b."\nnext: 1\n'), {"description": "a -- b.", "next": 1})
+
+    def test_single_quoted_scalar_over_two_lines(self):
+        self.assertEqual(load("msg: 'it''s\n  here'\nnext: 1\n"), {"msg": "it's here", "next": 1})
+
+    def test_quoted_continuation_may_sit_at_column_zero(self):
+        self.assertEqual(load("a:\n  msg: 'one\ntwo'\n  b: 2\n"), {"a": {"msg": "one two", "b": 2}})
+
+    def test_quoted_blank_line_and_escaped_line_break(self):
+        self.assertEqual(load('a: "one\n\n  two\\\n  three"\n'), {"a": "one\ntwothree"})
+
+    def test_quoted_hash_on_a_continuation_line_is_text(self):
+        self.assertEqual(load('a: "one\n  # two"\n'), {"a": "one # two"})
+
+    def test_multi_line_quoted_sequence_item(self):
+        self.assertEqual(load('x:\n  - "one\n    two"\n  - three\n'), {"x": ["one two", "three"]})
+
+    def test_quoted_value_that_never_closes_raises(self):
+        with self.assertRaises(YamlError) as ctx:
+            load('a: "one\nb: 2\n')
+        self.assertIn("line 1", str(ctx.exception))
+
+    def test_text_after_a_multi_line_closing_quote_raises(self):
+        with self.assertRaises(YamlError):
+            load('a: "one\n  two" three\n')
+
+    def test_long_folded_scalar_loads_in_linear_time(self):
+        text = "a: start\n" + "  word\n" * 19000 + "b: 2\n"
+        started = time.perf_counter()
+        doc = load(text)
+        elapsed = time.perf_counter() - started
+        self.assertEqual(doc["b"], 2)
+        self.assertEqual(len(doc["a"]), len("start") + 5 * 19000)
+        self.assertLess(elapsed, 1.0)
+
+
+class ValuesOnTheNextLine(unittest.TestCase):
+    def test_plain_scalar(self):
+        doc = load('run:\n  echo "CC=cc" >> $GITHUB_ENV\nnext: 1\n')
+        self.assertEqual(doc, {"run": 'echo "CC=cc" >> $GITHUB_ENV', "next": 1})
+
+    def test_plain_scalar_over_several_lines(self):
+        doc = load("run:\n    one\n    two\n  three\nnext: 1\n")
+        self.assertEqual(doc, {"run": "one two three", "next": 1})
+
+    def test_flow_sequence(self):
+        self.assertEqual(load("on:\n  [push, pull_request]\n"), {"on": ["push", "pull_request"]})
+
+    def test_flow_sequence_opened_on_its_own_line(self):
+        text = "os:\n  [\n    ubuntu-latest,\n    macos-latest,\n  ]\nnext: 1\n"
+        self.assertEqual(load(text), {"os": ["ubuntu-latest", "macos-latest"], "next": 1})
+
+    def test_quoted_scalar(self):
+        self.assertEqual(load("a:\n  'x: y'\nb: 2\n"), {"a": "x: y", "b": 2})
+
+    def test_alias(self):
+        self.assertEqual(load("a: &v [x]\nb:\n  *v\n"), {"a": ["x"], "b": ["x"]})
+
+    def test_block_scalar(self):
+        self.assertEqual(load("a:\n  |\n    text\nb: 2\n"), {"a": "text", "b": 2})
+
+    def test_anchor_on_its_own_line(self):
+        doc = load("a:\n  &m\n  k: v\nb: *m\n")
+        self.assertEqual(doc, {"a": {"k": "v"}, "b": {"k": "v"}})
+
+    def test_a_key_still_starts_a_mapping(self):
+        self.assertEqual(load("a:\n  echo foo: bar\n"), {"a": {"echo foo": "bar"}})
+
+
+class LeftoverLines(unittest.TestCase):
+    def test_a_line_the_parse_does_not_use_raises_with_its_line_number(self):
+        with self.assertRaises(YamlError) as ctx:
+            load("a: 1\nb:\n  c: 2\n d: 3\n")
+        self.assertIn("line 4", str(ctx.exception))
+
+    def test_line_numbers_count_a_leading_triple_dash(self):
+        with self.assertRaises(YamlError) as ctx:
+            load("---\na: 'x'\n  y\n")
+        self.assertIn("line 3", str(ctx.exception))
+
+    def test_trailing_comments_and_blank_lines_are_fine(self):
+        self.assertEqual(load("a: 1\n\n   # trailing note\n\n"), {"a": 1})
 
 
 class LongIntegers(unittest.TestCase):

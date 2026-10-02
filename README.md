@@ -407,7 +407,9 @@ one deliberate difference from PyYAML's default behavior: it resolves booleans t
 schema does (only `true`/`false`), not YAML 1.1's (which also turns `on`, `off`, `yes`,
 and `no` into booleans). That difference is the entire reason this project does not take
 a YAML dependency: the field this tool cares about most, `on:`, is exactly the field
-PyYAML's default loader gets wrong. An alias reuses the anchored value instead of
+PyYAML's default loader gets wrong. Values can run over several lines or start on the
+line after their key, and a line the reader cannot place is a parse error that names
+the line rather than something it skips. An alias reuses the anchored value instead of
 copying it, and a file whose aliases would add more than two million characters once
 copied out is a parse error, so an alias bomb fails fast instead of hanging whatever
 reads it. Merge keys (`<<: *name`) are a parse error, because GitHub rejects them too.

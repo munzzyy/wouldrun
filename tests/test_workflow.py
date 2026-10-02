@@ -39,6 +39,65 @@ class OnShorthand(unittest.TestCase):
         self.assertIsNotNone(wf.parse_error)
 
 
+class ValuesThatSpanLines(unittest.TestCase):
+    def test_multi_line_if_keeps_the_next_job(self):
+        text = (
+            "on: push\njobs:\n"
+            "  build:\n    if: github.event_name == 'push' &&\n      github.ref == 'refs/heads/main'\n"
+            "    runs-on: u\n"
+            "  deploy:\n    uses: ./.github/workflows/x.yml\n"
+        )
+        wf = parse_workflow("x.yml", text)
+        self.assertIsNone(wf.parse_error)
+        self.assertEqual(set(wf.jobs), {"build", "deploy"})
+        self.assertEqual(wf.jobs["build"].condition, "github.event_name == 'push' && github.ref == 'refs/heads/main'")
+        self.assertEqual(wf.jobs["deploy"].uses, "./.github/workflows/x.yml")
+
+    def test_multi_line_quoted_input_description_keeps_the_jobs(self):
+        text = (
+            "on:\n  workflow_dispatch:\n    inputs:\n      ref:\n"
+            '        description: "Ref to build --\n          defaults to main."\n'
+            "  push:\n"
+            "jobs:\n  build:\n    runs-on: u\n  test:\n    runs-on: u\n"
+        )
+        wf = parse_workflow("x.yml", text)
+        self.assertIsNone(wf.parse_error)
+        self.assertEqual(set(wf.triggers), {"workflow_dispatch", "push"})
+        self.assertEqual(set(wf.jobs), {"build", "test"})
+
+    def test_on_list_on_the_next_line(self):
+        wf = parse_workflow("x.yml", "on:\n  [push, pull_request]\njobs:\n  b:\n    runs-on: u\n")
+        self.assertIsNone(wf.parse_error)
+        self.assertEqual(set(wf.triggers), {"push", "pull_request"})
+
+    def test_two_line_name_before_on(self):
+        text = "name: Build and\n  test\non: push\njobs:\n  b:\n    runs-on: u\n"
+        wf = parse_workflow("x.yml", text)
+        self.assertIsNone(wf.parse_error)
+        self.assertEqual(wf.name, "Build and test")
+        self.assertEqual(set(wf.triggers), {"push"})
+
+    def test_block_scalar_with_an_indentation_indicator_keeps_the_next_job(self):
+        text = (
+            "on: push\njobs:\n"
+            "  build:\n    runs-on: u\n    steps:\n      - run: |2-\n            echo one: 1\n          echo two\n"
+            "  deploy:\n    uses: ./.github/workflows/x.yml\n"
+        )
+        wf = parse_workflow("x.yml", text)
+        self.assertIsNone(wf.parse_error)
+        self.assertEqual(set(wf.jobs), {"build", "deploy"})
+
+    def test_a_misindented_line_is_a_parse_error_not_a_dropped_job(self):
+        text = (
+            "on: push\njobs:\n"
+            "  build:\n    runs-on: u\n    steps:\n      - run: echo\n     - run: oops\n"
+            "  deploy:\n    uses: ./.github/workflows/x.yml\n"
+        )
+        wf = parse_workflow("x.yml", text)
+        self.assertIsNotNone(wf.parse_error)
+        self.assertIn("line 7", wf.parse_error)
+
+
 class OnKeyBooleanGuard(unittest.TestCase):
     """wouldrun's own parser never produces a boolean `on` key (see
     yamlmini's docstring). This exercises the defensive fallback in
