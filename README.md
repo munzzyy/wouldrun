@@ -407,8 +407,9 @@ schema does (only `true`/`false`), not YAML 1.1's (which also turns `on`, `off`,
 and `no` into booleans). That difference is the entire reason this project doesn't take
 a YAML dependency: the field this tool cares about most, `on:`, is exactly the field
 PyYAML's default loader gets wrong. An alias reuses the anchored value instead of
-copying it, so a file built to expand exponentially loads as fast as it reads. Merge
-keys (`<<: *name`) are a parse error, because GitHub rejects them too.
+copying it, and a file whose aliases would add more than two million characters once
+copied out is a parse error, so an alias bomb fails fast instead of hanging whatever
+reads it. Merge keys (`<<: *name`) are a parse error, because GitHub rejects them too.
 `wouldrun/globmatch.py` matches GitHub's
 filter-pattern glob syntax with a linear reach-set sweep over a compiled token list,
 not a translated regex: a regex where every `*` becomes `[^/]*` is ambiguous enough

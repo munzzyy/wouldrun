@@ -929,21 +929,42 @@ class AnchorsAndAliases(unittest.TestCase):
         self.assertIsNotNone(wf.parse_error)
         self.assertIn("merge key", wf.parse_error)
 
-    def test_amplified_alias_in_on_and_jobs_stays_fast(self):
+    def test_shared_alias_values_are_never_printed_in_full(self):
+        # Five levels stay under the reader's expansion cap but print as megabytes.
         lines = ['l0: &l0 ["lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol"]']
-        for k in range(1, 10):
+        for k in range(1, 5):
             lines.append(f"l{k}: &l{k} [" + ", ".join([f"*l{k - 1}"] * 10) + "]")
         start = time.monotonic()
-        listed = parse_workflow(".github/workflows/a.yml", "\n".join(lines + ["on: [push, *l9]"]) + "\n")
+        listed = parse_workflow(".github/workflows/a.yml", "\n".join(lines + ["on: [push, *l4]"]) + "\n")
         needs = parse_workflow(
             ".github/workflows/b.yml",
-            "\n".join(lines + ["on: push", "jobs:\n  a:\n    runs-on: u\n    needs: *l9"]) + "\n",
+            "\n".join(lines + ["on: push", "jobs:\n  a:\n    runs-on: u\n    needs: *l4"]) + "\n",
         )
         self.assertLess(time.monotonic() - start, 1.0)
         self.assertIn("non-string entry", listed.parse_error)
         self.assertLess(len(listed.parse_error), 500)
         self.assertIsNone(needs.parse_error)
         self.assertEqual(needs.jobs["a"].needs, [])
+
+    def test_alias_bombs_are_a_short_parse_error(self):
+        chain = ['l0: &l0 ["lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol"]']
+        for k in range(1, 12):
+            chain.append(f"l{k}: &l{k} [" + ", ".join([f"*l{k - 1}"] * 10) + "]")
+        big = "s: &s " + "a" * 100_000
+        texts = [
+            "\n".join(chain + ["on: {*l11 : x}", "jobs: {}"]),
+            "\n".join(chain + ["on: push", "jobs:", "  *l11 : x"]),
+            "\n".join([big, "on:", "  issues:", "    types: [" + ", ".join(["*s"] * 100) + "]", "jobs: {}"]),
+            "\n".join([big, "on: push", "jobs:", "  a:", "    needs: [" + ", ".join(["*s"] * 100) + "]"]),
+        ]
+        for text in texts:
+            start = time.monotonic()
+            wf = parse_workflow(".github/workflows/x.yml", text + "\n")
+            r = evaluate_all([wf], Event(name="issues", activity_type="closed"))[0]
+            self.assertLess(time.monotonic() - start, 1.0)
+            self.assertIn("aliases expand past", wf.parse_error)
+            self.assertLess(len(wf.parse_error), 200)
+            self.assertTrue(r.undetermined)
 
 
 if __name__ == "__main__":

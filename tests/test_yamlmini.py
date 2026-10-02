@@ -318,6 +318,53 @@ class AnchorsAndAliases(unittest.TestCase):
             self.assertIs(doc["on"], doc["l9"])
             self.assertIs(doc["l9"][0], doc["l9"][9])
 
+    def test_alias_chain_past_the_expansion_cap_raises(self):
+        for tail in ("on: {*l11 : x}", "on: push\njobs:\n  *l11 : x", "on: push\nname: *l11"):
+            start = time.monotonic()
+            with self.assertRaises(YamlError) as cm:
+                load(_alias_chain(12) + tail + "\n")
+            self.assertLess(time.monotonic() - start, 1.0)
+            self.assertIn("aliases expand past", str(cm.exception))
+
+    def test_one_long_string_aliased_many_times_raises(self):
+        # Linear in the file but quadratic once copied out: 100 KB times 100 aliases.
+        text = "s: &s " + "a" * 100_000 + "\non:\n  issues:\n    types: [" + ", ".join(["*s"] * 100) + "]\n"
+        with self.assertRaises(YamlError) as cm:
+            load(text)
+        self.assertIn("at *s", str(cm.exception))
+
+    def test_long_integer_aliased_many_times_raises(self):
+        text = "n: &n " + "9" * 4000 + "\njobs:\n  a:\n    needs: [" + ", ".join(["*n"] * 1000) + "]\n"
+        with self.assertRaises(YamlError) as cm:
+            load(text)
+        self.assertIn("at *n", str(cm.exception))
+
+    def test_reuse_under_the_cap_still_loads(self):
+        doc = load(_alias_chain(4) + "on: *l3\n")
+        self.assertIs(doc["on"], doc["l3"])
+
+    def test_non_string_alias_as_a_block_key_names_the_alias(self):
+        with self.assertRaises(YamlError) as cm:
+            load(_alias_chain(4) + "on: push\njobs:\n  *l3 : x\n")
+        self.assertIn("*l3", str(cm.exception))
+        self.assertLess(len(str(cm.exception)), 200)
+
+    def test_sequence_or_mapping_as_a_flow_key_raises(self):
+        for text in ("on: {[a, b]: x}\n", "on: {{a: b}: x}\n", _alias_chain(4) + "on: {*l3 : x}\n"):
+            with self.assertRaises(YamlError) as cm:
+                load(text)
+            self.assertIn("flow mapping key must be a scalar", str(cm.exception))
+
+    def test_scalar_flow_keys_still_become_strings(self):
+        self.assertEqual(load("x: &n 1\ny: {*n : a, 2: b, true: c}\n")["y"], {"1": "a", "2": "b", "True": "c"})
+
+
+def _alias_chain(levels):
+    lines = ['l0: &l0 ["lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol"]']
+    for k in range(1, levels):
+        lines.append(f"l{k}: &l{k} [" + ", ".join([f"*l{k - 1}"] * 10) + "]")
+    return "\n".join(lines) + "\n"
+
 
 if __name__ == "__main__":
     unittest.main()

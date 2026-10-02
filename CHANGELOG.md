@@ -9,7 +9,8 @@
 - `--fires-only` drops SKIPPED workflows from the report.
 - The license is now GPL-3.0-or-later. Releases up to 0.1.0 stay under MIT.
 - YAML anchors and aliases are resolved instead of read as text, which used to drop
-  triggers and jobs. A `<<` merge key is a parse error, as it is on GitHub.
+  triggers and jobs. A `<<` merge key is a parse error, as it is on GitHub. So is a
+  file whose aliases would add more than two million characters once copied out.
 - `--exit-fires` exits 2 when nothing fires but a workflow in scope failed to parse or
   evaluate, and names that workflow on stderr. JSON workflows get an `undetermined` field.
 - `repository_dispatch` honors `types:` with `--type` standing in for the `event_type`.

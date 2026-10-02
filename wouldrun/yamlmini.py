@@ -21,11 +21,13 @@ double-quoted scalars, plain scalars, `|`/`>` block scalars (consumed and
 kept as opaque text, since wouldrun never needs step/run bodies), comments,
 anchors and aliases (`&name` / `*name`), and a single leading `---` /
 trailing `...` document marker. An alias returns the same object its anchor
-built, never a copy, so a chain of aliases that would expand exponentially
-costs nothing to load. Merge keys (`<<: *name`) are rejected with a YamlError
-because GitHub rejects them too. Not supported: multi-document streams and
-tag annotations (`!!str` and friends are kept as part of the scalar text).
-Neither appears in the trigger and job metadata this tool reads.
+built, never a copy, but anything that later walks the document still sees
+every alias copied out. So each alias is charged the expanded size of what it
+points at, and a file whose aliases add up past MAX_ALIAS_EXPANSION is a
+YamlError, like a file over MAX_BYTES. Merge keys (`<<: *name`) are rejected
+with a YamlError because GitHub rejects them too. Not supported: multi-document
+streams and tag annotations (`!!str` and friends are kept as part of the scalar
+text). Neither appears in the trigger and job metadata this tool reads.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ import re
 MAX_BYTES = 2 * 1024 * 1024
 MAX_LINES = 20000
 MAX_DEPTH = 200  # nesting levels; real workflow files never get close
+MAX_ALIAS_EXPANSION = MAX_BYTES  # characters plus one per node, summed over every alias
 
 _BLOCK_SCALAR_RE = re.compile(r"^[|>][+-]?\d*$")
 _INT_RE = re.compile(r"^[-+]?[0-9]+$")
@@ -68,6 +71,8 @@ class _Parser:
         self.n = len(lines)
         self._depth = 0
         self.anchors = {}
+        self._sizes = {}  # id -> (object, expanded size); holding the object keeps the id unique
+        self._expanded = 0
         self._trim_document_markers()
 
     def _trim_document_markers(self):
@@ -163,9 +168,9 @@ class _Parser:
             raise YamlError(_MERGE_KEY_ERROR)
         anchor, key = _split_anchor(key)
         if _ALIAS_RE.match(key):
-            key = self._alias(key)
+            token, key = key, self._alias(key)
             if not isinstance(key, str):
-                raise YamlError(f"alias used as a mapping key is not a string: {key!r}")
+                raise YamlError(f"alias {token} is used as a mapping key but is not a string")
         if anchor is not None:
             self.anchors[anchor] = key
         return key
@@ -187,10 +192,42 @@ class _Parser:
         return value, next_i
 
     def _alias(self, token):
-        name = token[1:]
+        return self.resolve(token[1:])
+
+    def resolve(self, name):
         if name not in self.anchors:
             raise YamlError(f"alias *{name} refers to an anchor that is not defined above it")
-        return self.anchors[name]
+        value = self.anchors[name]
+        self._expanded += self._expanded_size(value)
+        if self._expanded > MAX_ALIAS_EXPANSION:
+            raise YamlError(f"aliases expand past {MAX_ALIAS_EXPANSION} characters at *{name}")
+        return value
+
+    def _expanded_size(self, value):
+        """Characters plus one per node in `value` with every alias copied out,
+        memoized per object so shared values are walked once."""
+        sizes = self._sizes
+        stack = [value]
+        while stack:
+            obj = stack[-1]
+            if id(obj) in sizes:
+                stack.pop()
+                continue
+            if isinstance(obj, dict):
+                children = [*obj.keys(), *obj.values()]
+            elif isinstance(obj, list):
+                children = obj
+            else:
+                sizes[id(obj)] = (obj, _scalar_size(obj))
+                stack.pop()
+                continue
+            todo = [c for c in children if id(c) not in sizes]
+            if todo:
+                stack.extend(todo)
+                continue
+            sizes[id(obj)] = (obj, 1 + sum(sizes[id(c)][1] for c in children))
+            stack.pop()
+        return sizes[id(value)][1]
 
     def _parse_sequence(self, idx, indent):
         result = []
@@ -325,7 +362,7 @@ class _Parser:
         before parsing. Returns (value, next_line_index)."""
         if rest and rest[0] in "[{":
             text, end = self._gather_flow(rest, real)
-            return _FlowParser(text, self.anchors).parse(), end + 1
+            return _FlowParser(text, self).parse(), end + 1
         if rest.startswith("*"):
             if not _ALIAS_RE.match(rest):
                 raise YamlError(f"malformed alias: {rest!r}")
@@ -490,6 +527,14 @@ def _coerce_scalar(token):
     return token
 
 
+def _scalar_size(value):
+    if isinstance(value, str):
+        return len(value) + 1
+    if isinstance(value, int):
+        return value.bit_length() // 3 + 1  # its decimal digits, without building the string
+    return 1
+
+
 def _split_anchor(text):
     """Peel a leading `&name` off `text`: (name, the rest) or (None, text)."""
     m = _ANCHOR_RE.match(text)
@@ -501,12 +546,12 @@ def _split_anchor(text):
 class _FlowParser:
     """Recursive-descent parser for inline `[...]` / `{...}` flow collections."""
 
-    def __init__(self, s, anchors):
+    def __init__(self, s, owner):
         self.s = s
         self.i = 0
         self.n = len(s)
         self._depth = 0
-        self.anchors = anchors
+        self.owner = owner
 
     def parse(self):
         self._ws()
@@ -537,13 +582,10 @@ class _FlowParser:
         if c == "&":
             name = self._name()
             value = self._value()
-            self.anchors[name] = value
+            self.owner.anchors[name] = value
             return value
         if c == "*":
-            name = self._name()
-            if name not in self.anchors:
-                raise YamlError(f"alias *{name} refers to an anchor that is not defined above it")
-            return self.anchors[name]
+            return self.owner.resolve(self._name())
         return self._plain()
 
     def _name(self):
@@ -592,6 +634,8 @@ class _FlowParser:
             key = self._value()
             if key == "<<" and not quoted:
                 raise YamlError(_MERGE_KEY_ERROR)
+            if isinstance(key, (list, dict)):
+                raise YamlError("a flow mapping key must be a scalar, not a sequence or a mapping")
             self._ws()
             if self.i < self.n and self.s[self.i] == ":":
                 self.i += 1
