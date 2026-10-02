@@ -51,6 +51,7 @@ _TYPED_EVENTS = frozenset(
         "pull_request_review_comment",
         "registry_package",
         "release",
+        "repository_dispatch",  # types: filters on the dispatched event_type
         "watch",
         "workflow_run",
     }

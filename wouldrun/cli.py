@@ -49,7 +49,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="activity_type",
         default=None,
         help="activity type for pull_request-like events (opened, synchronize, "
-        "reopened, ...); default: GitHub's default types for the event",
+        "reopened, ...), or the event_type for repository_dispatch; default: "
+        "GitHub's default types for the event",
     )
     p.add_argument(
         "--triggering-workflow",

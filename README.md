@@ -273,7 +273,8 @@ instead if you want even tags to stop moving.
   `release`, `discussion`, `discussion_comment`, `registry_package`, `watch`, `project`,
   `project_card`, and the rest): a `--type` that the workflow's `types:` list leaves out is
   reported as SKIPPED. These events fire on all of their activity types by default, so a
-  bare trigger with no `types:` matches any `--type` you pass.
+  bare trigger with no `types:` matches any `--type` you pass. `repository_dispatch` works
+  the same way, with `--type` standing in for the dispatched `event_type`.
 - `workflow_run`: `types`, the `workflows:` name list against `--triggering-workflow`
   (GitHub requires `workflows:` for this trigger to ever run, so a missing list or an
   unconfirmed name reports SKIPPED, not a guessed FIRES), and the `branches`/

@@ -651,6 +651,24 @@ class TypedEventTypesFilter(unittest.TestCase):
         r = _run(text, Event(name="issues"))
         self.assertTrue(r.fires)
 
+    def test_repository_dispatch_types_filter_the_event_type(self):
+        text = "on:\n  repository_dispatch:\n    types: [build]\njobs:\n  b:\n    runs-on: u\n"
+        r = _run(text, Event(name="repository_dispatch", activity_type="deploy"))
+        self.assertFalse(r.fires)
+        self.assertEqual(r.reasons[-1], "activity type `deploy` is not in `types: ['build']`")
+        self.assertTrue(_run(text, Event(name="repository_dispatch", activity_type="build")).fires)
+
+    def test_repository_dispatch_with_types_and_no_type_given_fires(self):
+        text = "on:\n  repository_dispatch:\n    types: [build]\njobs:\n  b:\n    runs-on: u\n"
+        r = _run(text, Event(name="repository_dispatch"))
+        self.assertTrue(r.fires)
+        self.assertIn("no activity type given", r.reasons[-1])
+
+    def test_bare_repository_dispatch_fires_for_any_type(self):
+        text = "on: repository_dispatch\njobs:\n  b:\n    runs-on: u\n"
+        self.assertTrue(_run(text, Event(name="repository_dispatch", activity_type="deploy")).fires)
+        self.assertTrue(_run(text, Event(name="repository_dispatch")).fires)
+
     def test_pull_request_target_types_still_filtered(self):
         # pull_request_target keeps its own handler (branches/paths + subset
         # default types); make sure its `types:` filtering did not regress.
