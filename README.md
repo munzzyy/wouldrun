@@ -440,8 +440,8 @@ above.
 
 ## Roadmap
 
-What is left needs a person rather than more code: a release, a run on GitHub's own
-runners, and two decisions for the maintainer.
+What is left needs a person rather than more code: a run on GitHub's own runners,
+and two decisions for the maintainer.
 
 - A live run of the two Action paths that cannot run here: a `pull_request_target`
   workflow, and `post-comment: "true"` on a pull request from a fork. Both are tested
