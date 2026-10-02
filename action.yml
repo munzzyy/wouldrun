@@ -142,6 +142,35 @@ runs:
           "${workflow_args[@]}" \
           --json > "$RUNNER_TEMP/wouldrun.json"
 
+    - name: Run wouldrun as pull_request_target against the base branch's workflows
+      # GitHub runs those for the same pull request, from the base branch's copy.
+      # Only .github/workflows is checked out, and nothing from the PR head.
+      if: steps.guard.outputs.skip != 'true' && github.event_name == 'pull_request'
+      shell: bash
+      working-directory: ${{ runner.temp }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+        ACTIVITY_TYPE: ${{ github.event.action }}
+      run: |
+        set -e
+        base_tree="$RUNNER_TEMP/wouldrun-base"
+        git -C "$GITHUB_WORKSPACE" worktree remove --force "$base_tree" 2>/dev/null || true
+        rm -rf "$base_tree"
+        git -C "$GITHUB_WORKSPACE" worktree add --quiet --detach --no-checkout "$base_tree" "origin/$BASE_REF"
+        trap 'git -C "$GITHUB_WORKSPACE" worktree remove --force "$base_tree"' EXIT
+        if git -C "$base_tree" cat-file -e "HEAD:.github/workflows" 2>/dev/null; then
+          git -C "$base_tree" checkout --quiet HEAD -- .github/workflows
+        fi
+        python3 -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))["event"]["changed_files"]))' \
+          "$RUNNER_TEMP/wouldrun.json" > "$RUNNER_TEMP/wouldrun-changed.txt"
+        python3 -m wouldrun "$base_tree" \
+          --event pull_request_target \
+          --base "$BASE_REF" \
+          --type "$ACTIVITY_TYPE" \
+          --changed-from "$RUNNER_TEMP/wouldrun-changed.txt" \
+          --json > "$RUNNER_TEMP/wouldrun-target.json"
+
     - name: Format the report and set the outputs
       id: report
       if: steps.guard.outputs.skip != 'true'
@@ -149,9 +178,22 @@ runs:
       working-directory: ${{ runner.temp }}
       env:
         PYTHONPATH: ${{ github.action_path }}
+        EVENT_NAME: ${{ github.event_name }}
+        WORKFLOWS: ${{ inputs.workflow }}
       run: |
+        set -e
+        reports=("$RUNNER_TEMP/wouldrun.json")
+        if [ "$EVENT_NAME" = "pull_request" ]; then
+          reports+=("$RUNNER_TEMP/wouldrun-target.json")
+        fi
+        workflow_args=()
+        while IFS= read -r name; do
+          if [[ $name =~ [^[:space:]] ]]; then
+            workflow_args+=(--workflow "$name")
+          fi
+        done <<< "$WORKFLOWS"
         python3 -m wouldrun.pr_format --github-output "$GITHUB_OUTPUT" \
-          "$RUNNER_TEMP/wouldrun.json" > "$RUNNER_TEMP/wouldrun.md"
+          "${workflow_args[@]}" "${reports[@]}" > "$RUNNER_TEMP/wouldrun.md"
 
     - name: Write job summary
       if: steps.guard.outputs.skip != 'true' && inputs.post-comment != 'true'

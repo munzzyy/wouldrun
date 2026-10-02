@@ -37,6 +37,9 @@
   PR with a read-only token the table goes to the job summary instead of failing.
 - Action: new `workflow` input plus `fires`, `fired-count` and `fired-workflows`
   outputs for gating a later job.
+- Action: on `pull_request` it also checks the base branch workflows as
+  `pull_request_target`, which GitHub runs for the same pull request. The table gets
+  an Event column.
 - SECURITY.md and the README list every subprocess and the one network path. The In CI
   snippets check out full history and pass the base through `env:`.
 - CI adds Python 3.10 and 3.14, tests the comment script with Node and runs the Action

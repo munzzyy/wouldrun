@@ -33,7 +33,9 @@ write-scoped token (`pull-requests: write`); see the README's GitHub Action
 section for why it is opt-in rather than the default. On `pull_request_target`
 the Action also fetches the PR's head commit, authenticated with the
 `github-token` input, so it can diff it. That commit is never checked out, and
-the only thing read from it is the list of paths it changed.
+the only thing read from it is the list of paths it changed. On `pull_request`
+it also reads the base branch workflows from a worktree of `origin/<base>` that
+checks out only `.github/workflows`.
 
 ## Reporting a vulnerability
 

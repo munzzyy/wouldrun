@@ -237,6 +237,13 @@ changed files, and reports the FIRES/SKIPPED table. On `pull_request_target`, wh
 GitHub checks out the base branch, it fetches the PR's head commit with the
 `github-token` input and diffs that without checking it out.
 
+GitHub runs a repo's `pull_request_target` workflows for the same pull request too, from
+the base branch's copy. So on `pull_request` the Action also evaluates those, reading
+them from a worktree of the base branch with only `.github/workflows` checked out, and
+the table gets an Event column that says which event each verdict is for. A
+`pull_request_target` workflow that the pull request adds or edits is judged by the
+base branch's copy, since that is the one GitHub runs.
+
 By default that report only goes to the job summary, nothing posted anywhere,
 no permission beyond the default `contents: read`:
 
@@ -292,7 +299,8 @@ The `workflow` input narrows the report to the workflows you name, one per line,
 matched the way `--workflow` matches them. A name that matches nothing fails the
 step. Three outputs carry the verdict to later jobs:
 
-- `fires`: `"true"` if at least one reported workflow would fire, else `"false"`
+- `fires`: `"true"` if at least one reported workflow would fire, under either event
+  on a `pull_request` run, else `"false"`
 - `fired-count`: how many would fire
 - `fired-workflows`: their paths, as a one-line JSON array
 
