@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [Unreleased]
 
 - `workflow_run` triggers check their `workflows:` list against the new
   `--triggering-workflow NAME`. A missing list or no name to check reports SKIPPED
@@ -8,11 +8,12 @@
 - `--pr NUMBER` takes a pull request base branch and its changed files from `gh pr view`.
 - `--fires-only` drops SKIPPED workflows from the report.
 - The license is now GPL-3.0-or-later. Releases up to 0.1.0 stay under MIT.
-- YAML anchors and aliases are resolved instead of read as text, which used to drop
-  triggers and jobs. A `<<` merge key is a parse error, as it is on GitHub. So is a
-  file whose aliases would add more than two million characters once copied out.
+- YAML anchors and aliases are resolved. Reading them as text used to drop triggers
+  and jobs. A `<<` merge key is a parse error, as it is on GitHub. So is a file whose
+  aliases would add more than two million characters once copied out.
+- A number too long for Python's `int()` stays text instead of crashing the whole run.
 - `--exit-fires` exits 2 when nothing fires but a workflow in scope failed to parse or
-  evaluate, and names that workflow on stderr. JSON workflows get an `undetermined` field.
+  evaluate and names that workflow on stderr. JSON workflows get an `undetermined` field.
 - `repository_dispatch` honors `types:` with `--type` standing in for the `event_type`.
 - `--head REF` next to `--diff` lists what REF changed without checking it out. An
   empty changed-files source now says no files changed.
@@ -37,7 +38,7 @@
 - CI adds Python 3.10 and 3.14, tests the comment script with Node and runs the Action
   on pull requests to this repo.
 
-## 0.1.0 (2026-08-02)
+## [0.1.0] (2026-08-02)
 
 First tagged release, under the MIT license.
 
@@ -50,3 +51,6 @@ First tagged release, under the MIT license.
   branch), `--workflow`, `--exit-fires`, `--json` and `--list`.
 - A composite GitHub Action that writes the table to the job summary or, opt-in, to a
   sticky PR comment.
+
+[Unreleased]: https://github.com/munzzyy/wouldrun/compare/v0.1.0...main
+[0.1.0]: https://github.com/munzzyy/wouldrun/tree/v0.1.0

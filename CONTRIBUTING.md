@@ -1,6 +1,8 @@
 # Contributing
 
-Thanks for looking at this. It's a small, single-purpose tool and contributions are welcome.
+Thanks for looking at this. It is a small, single-purpose tool and contributions are welcome.
+Not sure whether something is a bug? Open an issue at https://github.com/munzzyy/wouldrun/issues
+and ask.
 
 ## Setup
 
@@ -17,12 +19,12 @@ Nothing to install. wouldrun is pure standard library, and so is its test suite.
 python -m unittest discover -s tests -t .
 ```
 
-That's the whole suite: the YAML reader, the glob translator, workflow parsing, the
+That is the whole suite: the YAML reader, the glob translator, workflow parsing, the
 trigger-matching engine, discovery, `git diff`, and the CLI. CI runs the same command
 across Linux, macOS, and Windows on Python 3.9, 3.10, 3.11, 3.12, 3.13, and 3.14.
 
-The Action posts its PR comment from `scripts/sticky-comment.js`. Its tests use
-Node's built-in test runner, so there is no npm install here either:
+The Action posts its PR comment from `scripts/sticky-comment.js`. Its tests run on the
+test runner built into Node, so there is no npm install here either:
 
 ```
 node --test tests/js/
@@ -40,10 +42,11 @@ cite a source than guess at GitHub's undocumented corners.
 
 ## Zero dependencies
 
-wouldrun has no runtime dependencies and that's a feature, not an oversight. See the
+wouldrun has no runtime dependencies and that is a feature, not an oversight. See the
 README's "How it works" section for why a generic YAML library specifically was the
-wrong call here. If a change needs one, that's a reason to reconsider the change.
+wrong call here. If a change needs one, that is a reason to reconsider the change.
 
 ## License
 
-By opening a PR you agree your contribution is offered under the project's GPL-3.0-or-later license.
+By opening a PR you agree your contribution is offered under the same GPL-3.0-or-later
+license as the rest of the project.

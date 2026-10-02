@@ -113,17 +113,17 @@ $ wouldrun
   no --ref given; using the checked-out branch `refs/heads/feature/x`
 ```
 
-If there's no branch to read (not a git repo, detached HEAD, no git on PATH) it
+If there is no branch to read (not a git repo, detached HEAD, no git on PATH) it
 falls back to `refs/heads/main` and says that instead. `--json` carries the same
 information as `event.ref_source`: `flag`, `git`, or `default`.
 
 A `pull_request` or `pull_request_target` run works the same way for the base
 branch: leave `--base` off (and `--pr`, which brings its own) and the report says
-`no --base given; assuming main`. In `--json` that's `event.base_ref_source`:
+`no --base given; assuming main`. `--json` carries it as `event.base_ref_source`:
 `flag`, `pr`, or `default`. Other events have no base, so with no `--base` both
 fields are `null`.
 
-An `--event` name GitHub doesn't have gets a warning on stderr, with the closest real
+An `--event` name GitHub does not have gets a warning on stderr, with the closest real
 name if there is one (`pul_request` gets "did you mean `pull_request`?"), and so does a
 `--type` on an event that has no activity types, like `push`.
 
@@ -143,13 +143,13 @@ leading `./` is dropped, a leading `/` is dropped with a note on stderr, and on
 Windows a backslash becomes `/`, so `.\src\app.py` still matches `src/**`.
 
 `--diff` finds where the checked-out branch forked from BASE and lists what changed
-since: committed, uncommitted, and new files you haven't `git add`ed yet, leaving out
+since: committed, uncommitted, and new files you have not `git add`ed yet, leaving out
 anything `.gitignore` covers. `--head REF` diffs REF's committed tree instead,
 without checking it out. The Action uses that on `pull_request_target`, where the
 checkout is the base branch and the PR's files would otherwise never show up.
 
 `--pr` looks up an already-open GitHub pull request with `gh pr view` and uses its base
-branch and changed files, so there's nothing to transcribe by hand. It needs `gh` on
+branch and changed files, so there is nothing to transcribe by hand. It needs `gh` on
 PATH and access to the repo, and it sets `--event` to `pull_request` unless you pass
 `--event` yourself. `--base` still wins if you pass it alongside `--pr`.
 
@@ -191,7 +191,7 @@ pasted into the script:
 fire, 1 if none would) instead of the default, which is always 0 so you can pipe the
 report into something else without tripping `set -e`. Exit 2 means it could not
 determine the answer: nothing fires, but a workflow in scope could not be parsed or
-has a filter pattern wouldrun can't evaluate, and that one might be a workflow GitHub
+has a filter pattern wouldrun cannot evaluate, and that one might be a workflow GitHub
 runs. The file and the error go to stderr.
 
 Across a whole repo that answer is almost always yes, since one unfiltered
@@ -212,7 +212,7 @@ the environment for it? `--workflow` asks that, and scopes `--exit-fires` to it:
 ```
 
 It matches a workflow's `name:`, its file name (`e2e.yml`), its stem (`e2e`), or its
-path, case-insensitively, and it's repeatable. A value that matches nothing exits 2
+path, case-insensitively, and it is repeatable. A value that matches nothing exits 2
 rather than reporting that nothing fires.
 
 ### Output formats
@@ -273,10 +273,10 @@ common reason people end up muting or removing an Action, and
 `pull-requests: write` is a real trust bar above a job that only reads. The
 comment path finds and updates the comment it wrote last time instead of posting
 a new one, so a PR carries at most one wouldrun comment no matter how many times
-it's pushed to. It only edits a comment that starts with a hidden
+it is pushed to. It only edits a comment that starts with a hidden
 `<!-- wouldrun -->` marker and was written by the same account, so pasting the
-marker into your own comment doesn't make it a target. A `pull_request` run from
-a fork gets a read-only token and can't comment at all; the table goes to the
+marker into your own comment does not make it a target. A `pull_request` run from
+a fork gets a read-only token and cannot comment at all; the table goes to the
 job summary with a warning instead of failing the job.
 
 The `@v0.1.0` pin above is the current tagged release. Pin to a commit SHA
@@ -337,7 +337,7 @@ this needs a commit from `main`.
   wouldrun evaluates with `paths` and says so instead of guessing.
 - `pull_request` / `pull_request_target`: `branches`/`branches-ignore` against the PR
   base, `paths`/`paths-ignore` against changed files, and `types` against an activity
-  type you pass with `--type` (falling back to GitHub's default types when you don't).
+  type you pass with `--type` (falling back to GitHub's default types when you do not).
 - `types` on every other typed event too (`issues`, `issue_comment`, `label`, `milestone`,
   `release`, `discussion`, `discussion_comment`, `registry_package`, `watch`, `project`,
   `project_card`, and the rest): a `--type` that the workflow's `types:` list leaves out is
@@ -362,7 +362,7 @@ this needs a commit from `main`.
   the self-repository form GitHub added in July 2026, resolves to the same file.
 - The `on:` boolean-coercion trap: PyYAML's default loader resolves an unquoted `on`
   key to the Python boolean `True` under YAML 1.1 rules, so a workflow's trigger
-  silently vanishes the moment you `yaml.safe_load` it. wouldrun doesn't use PyYAML
+  silently vanishes the moment you `yaml.safe_load` it. wouldrun does not use PyYAML
   (see "How it works" below), and `tests/test_workflow.py` exercises the fallback guard
   directly in case that ever changes.
 
@@ -391,7 +391,7 @@ this needs a commit from `main`.
 - It resolves `workflow_call` only for same-repo paths, written either way:
   `./.github/workflows/*` or the newer `$/.github/workflows/*`. A call into another
   repo's reusable workflow is not followed. The calling job still shows up in the
-  job list, and that's all the report says about it.
+  job list, and that is all the report says about it.
 - It is a static tool. It never pushes, opens a PR, or runs a workflow. The only
   programs it starts are read-only lookups, each with a fixed argument list and a 30 s
   timeout: `git merge-base`, `git diff --name-only` and `git ls-files --others` for
@@ -405,7 +405,7 @@ for the subset of YAML that workflow files use (block and flow mappings/sequence
 quoted and plain scalars, `|`/`>` block scalars, comments, `&anchor`/`*alias`) with
 one deliberate difference from PyYAML's default behavior: it resolves booleans the way YAML 1.2's core
 schema does (only `true`/`false`), not YAML 1.1's (which also turns `on`, `off`, `yes`,
-and `no` into booleans). That difference is the entire reason this project doesn't take
+and `no` into booleans). That difference is the entire reason this project does not take
 a YAML dependency: the field this tool cares about most, `on:`, is exactly the field
 PyYAML's default loader gets wrong. An alias reuses the anchored value instead of
 copying it, and a file whose aliases would add more than two million characters once
@@ -416,10 +416,13 @@ filter-pattern glob syntax with a linear reach-set sweep over a compiled token l
 not a translated regex: a regex where every `*` becomes `[^/]*` is ambiguous enough
 that a pattern a workflow file is allowed to contain sends Python's engine into
 catastrophic backtracking. `wouldrun/evaluate.py` is the trigger-matching engine
-described above. Nothing here calls a model, and the CLI never writes a file. `--pr`
-is the only thing that touches the network, through `gh pr view`; everything else
-reads local files and the local git repo. Every subprocess is a fixed `argv` list,
-never a shell string, and the full list is in "What it does not do" above.
+described above. Nothing here calls a model, and the CLI never writes a file. In the
+CLI, `--pr` is the only thing that touches the network, through `gh pr view`; everything
+else reads local files and the local git repo. The Action goes to the network for more
+than that: `actions/checkout` and `actions/setup-python`, a `git fetch` of the PR head on
+`pull_request_target`, and the GitHub API when `post-comment` is on. Every subprocess is
+a fixed `argv` list, never a shell string, and the full list is in "What it does not do"
+above.
 
 ## Roadmap
 
