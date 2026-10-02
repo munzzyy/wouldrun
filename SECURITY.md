@@ -19,9 +19,12 @@ vulnerability here. Plain wrong answers on well-formed workflows are ordinary
 bugs; an issue with the workflow file attached is perfect.
 
 The composite Action (`action.yml`) is a different trust boundary from the CLI
-above: it pip-installs wouldrun out of the action directory GitHub already
-checked out, never from PyPI, and only when `post-comment: "true"` is set does
-it call the GitHub API to read and write a PR comment. That comment path is the
+above. It runs wouldrun from its own action directory, the copy GitHub already
+fetched to run the action, with no pip install. Nothing from the PR checkout is
+executed: the Python steps run in the runner's temp directory, so a `wouldrun/`
+or `pip/` package in the PR can't stand in for the real one. Only when
+`post-comment: "true"` is set does it call the GitHub API to read and write a
+PR comment. That comment path is the
 one part of this project that needs a write-scoped token
 (`pull-requests: write`) and talks to the network at all; see the README's
 GitHub Action section for why it's opt-in rather than the default.

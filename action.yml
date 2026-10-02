@@ -25,7 +25,7 @@ inputs:
     required: false
     default: ${{ github.token }}
   python-version:
-    description: Python version used to install and run wouldrun.
+    description: Python version used to run wouldrun.
     required: false
     default: "3.x"
 
@@ -40,11 +40,14 @@ runs:
       # into a different trigger by mistake.
       id: guard
       shell: bash
+      env:
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        EVENT_NAME: ${{ github.event_name }}
       run: |
-        if [ -z "${{ github.event.pull_request.number }}" ]; then
+        if [ -z "$PR_NUMBER" ]; then
           {
             echo "wouldrun: no pull_request context on this event "
-            echo "(event=\`${{ github.event_name }}\`); nothing to evaluate against, skipping."
+            echo "(event=\`$EVENT_NAME\`); nothing to evaluate against, skipping."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "skip=true" >> "$GITHUB_OUTPUT"
         else
@@ -69,31 +72,31 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
-    - name: Install wouldrun
-      # Not on PyPI yet, so install from this action's own checkout --
-      # GitHub Actions already fetched this exact ref of the wouldrun repo
-      # to `github.action_path` in order to run this composite action, so
-      # it's the one copy guaranteed to match what's running.
-      if: steps.guard.outputs.skip != 'true'
-      shell: bash
-      run: python3 -m pip install --quiet "${{ github.action_path }}"
-
     - name: Run wouldrun against the PR's base and changed files
+      # The cwd goes first on sys.path, so Python never runs from the PR checkout.
       if: steps.guard.outputs.skip != 'true'
       shell: bash
+      working-directory: ${{ runner.temp }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+        ACTIVITY_TYPE: ${{ github.event.action }}
       run: |
         set -e
-        base="${{ github.event.pull_request.base.ref }}"
-        python3 -m wouldrun . \
-          --event "${{ github.event_name }}" \
-          --base "$base" \
-          --type "${{ github.event.action }}" \
-          --diff "origin/$base" \
+        python3 -m wouldrun "$GITHUB_WORKSPACE" \
+          --event "$EVENT_NAME" \
+          --base "$BASE_REF" \
+          --type "$ACTIVITY_TYPE" \
+          --diff "origin/$BASE_REF" \
           --json > "$RUNNER_TEMP/wouldrun.json"
 
     - name: Format the report as markdown
       if: steps.guard.outputs.skip != 'true'
       shell: bash
+      working-directory: ${{ runner.temp }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}
       run: python3 -m wouldrun.pr_format "$RUNNER_TEMP/wouldrun.json" > "$RUNNER_TEMP/wouldrun.md"
 
     - name: Write job summary
