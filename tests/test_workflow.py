@@ -2,7 +2,7 @@
 
 import unittest
 
-from wouldrun.workflow import Job, Workflow, _extract_on, parse_workflow
+from wouldrun.workflow import _extract_on, parse_workflow
 
 
 class OnShorthand(unittest.TestCase):
