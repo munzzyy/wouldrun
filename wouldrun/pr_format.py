@@ -12,12 +12,12 @@ from __future__ import annotations
 import json
 import sys
 
-# The comment-update logic in action.yml searches every existing PR comment
-# for this exact string to find the one it owns, so a later run updates it
-# in place instead of posting a new comment on every push. It's emitted
-# unconditionally, in both the job-summary and PR-comment output, since an
-# HTML comment renders invisibly either way and it costs nothing to keep the
-# two paths identical.
+# scripts/sticky-comment.js finds the comment it owns by a body that starts
+# with this exact string, so a later run updates it in place instead of
+# posting a new comment on every push. Changing it would orphan every existing
+# comment. It's emitted unconditionally, in both the job-summary and
+# PR-comment output, since an HTML comment renders invisibly either way and it
+# costs nothing to keep the two paths identical.
 MARKER = "<!-- wouldrun -->"
 
 

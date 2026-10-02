@@ -256,10 +256,13 @@ jobs:
 Opt-in instead of default-on because a bot that comments on every push is a
 common reason people end up muting or removing an Action, and
 `pull-requests: write` is a real trust bar above a job that only reads. The
-comment path finds and updates a single existing comment (by a hidden
-`<!-- wouldrun -->` marker, checked on every run) instead of posting a new one
-each time, so a PR carries at most one wouldrun comment no matter how many
-times it's pushed to.
+comment path finds and updates the comment it wrote last time instead of posting
+a new one, so a PR carries at most one wouldrun comment no matter how many times
+it's pushed to. It only edits a comment that starts with a hidden
+`<!-- wouldrun -->` marker and was written by the same account, so pasting the
+marker into your own comment doesn't make it a target. A `pull_request` run from
+a fork gets a read-only token and can't comment at all; the table goes to the
+job summary with a warning instead of failing the job.
 
 The `@v0.1.0` pin above is the current tagged release. Pin to a commit SHA
 instead if you want even tags to stop moving.

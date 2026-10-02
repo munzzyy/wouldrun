@@ -30,3 +30,12 @@ jobs:
         run: |
           python -m wouldrun examples/example-repo --list
           python -m wouldrun examples/example-repo --event push --ref refs/heads/main --changed src/app.py
+
+  sticky-comment-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test the sticky-comment script (Node's built-in runner, no npm)
+        run: node --test tests/js/

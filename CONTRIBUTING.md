@@ -21,6 +21,13 @@ That's the whole suite: the YAML reader, the glob translator, workflow parsing, 
 trigger-matching engine, discovery, `git diff`, and the CLI. CI runs the same command
 across Linux, macOS, and Windows on Python 3.9, 3.11, 3.12, and 3.13.
 
+The Action posts its PR comment from `scripts/sticky-comment.js`. Its tests use
+Node's built-in test runner, so there is no npm install here either:
+
+```
+node --test tests/js/
+```
+
 ## Fixing a filter bug
 
 The matching engine (`wouldrun/evaluate.py`) and the glob translator

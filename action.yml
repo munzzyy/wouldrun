@@ -130,39 +130,25 @@ runs:
       run: cat "$RUNNER_TEMP/wouldrun.md" >> "$GITHUB_STEP_SUMMARY"
 
     - name: Post or update the sticky PR comment
-      # Finds the comment this action owns by its hidden marker (see
-      # wouldrun/pr_format.py) and edits it in place; only creates a new one
-      # the first time no such comment exists yet. That's what keeps a
-      # force-push or a re-run from adding a second comment: the marker
-      # search runs fresh every time against every comment on the PR, so it
-      # doesn't matter whether this is the first run or the fiftieth.
+      # scripts/sticky-comment.js edits only a comment this action's own account
+      # wrote, and falls back to the job summary when the token is read-only.
       if: steps.guard.outputs.skip != 'true' && inputs.post-comment == 'true'
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       with:
         github-token: ${{ inputs.github-token }}
         script: |
           const fs = require("fs");
-          const body = fs.readFileSync(process.env.WOULDRUN_MD, "utf8");
-          const marker = "<!-- wouldrun -->";
-          const { owner, repo } = context.repo;
-          const issue_number = context.payload.pull_request.number;
-
-          const comments = await github.paginate(github.rest.issues.listComments, {
-            owner,
-            repo,
-            issue_number,
+          const path = require("path");
+          const { postStickyComment } = require(
+            path.join(process.env.WOULDRUN_ACTION_PATH, "scripts", "sticky-comment.js")
+          );
+          await postStickyComment({
+            github,
+            context,
+            core,
+            body: fs.readFileSync(process.env.WOULDRUN_MD, "utf8"),
+            summaryPath: process.env.GITHUB_STEP_SUMMARY,
           });
-          const existing = comments.find((c) => c.body && c.body.includes(marker));
-
-          if (existing) {
-            await github.rest.issues.updateComment({
-              owner,
-              repo,
-              comment_id: existing.id,
-              body,
-            });
-          } else {
-            await github.rest.issues.createComment({ owner, repo, issue_number, body });
-          }
       env:
         WOULDRUN_MD: ${{ runner.temp }}/wouldrun.md
+        WOULDRUN_ACTION_PATH: ${{ github.action_path }}
