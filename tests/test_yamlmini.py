@@ -1,5 +1,6 @@
 """Unit tests for the minimal YAML reader."""
 
+import time
 import unittest
 
 from wouldrun import yamlmini
@@ -226,6 +227,96 @@ class Malformed(unittest.TestCase):
         doc = load(text)
         self.assertEqual(len(doc), 2000)
         self.assertEqual(doc["key1999"]["a"], 1999)
+
+
+class AnchorsAndAliases(unittest.TestCase):
+    def test_flow_list_anchor_reused_by_alias(self):
+        doc = load("on:\n  push:\n    paths: &src ['src/**']\n  pull_request:\n    paths: *src\n")
+        self.assertEqual(doc["on"]["push"]["paths"], ["src/**"])
+        self.assertEqual(doc["on"]["pull_request"]["paths"], ["src/**"])
+
+    def test_anchored_block_sequence_keeps_the_rest_of_the_file(self):
+        # The old reader kept `&src` as text and dropped everything after it.
+        text = (
+            "on:\n  push:\n    paths: &src\n      - 'src/**'\n"
+            "  pull_request:\n    paths: *src\n"
+            "jobs:\n  build:\n    runs-on: u\n"
+        )
+        doc = load(text)
+        self.assertEqual(doc["on"]["push"]["paths"], ["src/**"])
+        self.assertEqual(doc["on"]["pull_request"]["paths"], ["src/**"])
+        self.assertEqual(list(doc["jobs"]), ["build"])
+
+    def test_anchored_indentless_sequence(self):
+        doc = load("paths: &src\n- 'src/**'\nother: *src\n")
+        self.assertEqual(doc, {"paths": ["src/**"], "other": ["src/**"]})
+
+    def test_anchored_flow_mapping_reused_as_a_trigger(self):
+        doc = load("on:\n  push: &trig {branches: [main], paths: ['src/**']}\n  pull_request: *trig\n")
+        self.assertEqual(doc["on"]["pull_request"], {"branches": ["main"], "paths": ["src/**"]})
+
+    def test_anchored_sequence_item_reused_in_a_later_job(self):
+        text = (
+            "jobs:\n"
+            "  build:\n    steps:\n      - &use_cache\n        uses: actions/cache@v4\n"
+            "        id: cache\n      - run: make\n"
+            "  test:\n    steps:\n      - *use_cache\n      - run: make check\n"
+            "  deploy:\n    runs-on: u\n"
+        )
+        doc = load(text)
+        self.assertEqual(list(doc["jobs"]), ["build", "test", "deploy"])
+        self.assertEqual(doc["jobs"]["test"]["steps"][0], {"uses": "actions/cache@v4", "id": "cache"})
+
+    def test_anchor_before_a_key_names_the_key(self):
+        # As in PyYAML, `&a key: value` anchors the key and the mapping keeps the anchor's column.
+        self.assertEqual(load("- &a key: value\n  k2: v2\n- *a\n"), [{"key": "value", "k2": "v2"}, "key"])
+
+    def test_anchored_scalars_and_block_scalars(self):
+        self.assertEqual(load("a: &x hello\nb: *x\n"), {"a": "hello", "b": "hello"})
+        self.assertEqual(load("a: &x |\n  echo hi\nb: *x\n"), {"a": "echo hi", "b": "echo hi"})
+
+    def test_anchors_and_aliases_inside_flow_collections(self):
+        self.assertEqual(load("x: [&a main, *a, {k: *a}]\n"), {"x": ["main", "main", {"k": "main"}]})
+
+    def test_quoted_ampersand_and_star_stay_literal(self):
+        self.assertEqual(load("a: '&x'\nb: \"*x\"\n"), {"a": "&x", "b": "*x"})
+
+    def test_undefined_alias_raises(self):
+        with self.assertRaises(YamlError) as cm:
+            load("on:\n  push:\n    paths: *nosuch\n")
+        self.assertIn("nosuch", str(cm.exception))
+
+    def test_alias_inside_its_own_anchor_raises(self):
+        with self.assertRaises(YamlError):
+            load("x: &a [*a]\n")
+
+    def test_merge_key_raises(self):
+        for text in (
+            "on:\n  push: &trig {branches: [main]}\n  pull_request:\n    <<: *trig\n",
+            "on:\n  push: &trig {branches: [main]}\n  pull_request: {<<: *trig}\n",
+        ):
+            with self.assertRaises(YamlError) as cm:
+                load(text)
+            self.assertIn("merge key", str(cm.exception))
+
+    def test_quoted_double_angle_key_is_not_a_merge_key(self):
+        self.assertEqual(load('"<<": 1\n'), {"<<": 1})
+
+    def test_alias_amplification_is_cheap(self):
+        # Ten levels of ten aliases would be 10**10 strings if aliases copied.
+        lines = ['l0: &l0 ["lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol"]']
+        for k in range(1, 10):
+            lines.append(f"l{k}: &l{k} [" + ", ".join([f"*l{k - 1}"] * 10) + "]")
+        lines.append("on: *l9")
+        start = time.monotonic()
+        try:
+            doc = load("\n".join(lines) + "\n")
+        except YamlError:
+            doc = None
+        self.assertLess(time.monotonic() - start, 1.0)
+        if doc is not None:
+            self.assertIs(doc["on"], doc["l9"])
+            self.assertIs(doc["l9"][0], doc["l9"][9])
 
 
 if __name__ == "__main__":

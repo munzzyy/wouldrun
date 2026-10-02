@@ -313,12 +313,15 @@ instead if you want even tags to stop moving.
 
 wouldrun does not use PyYAML. `wouldrun/yamlmini.py` is a small, from-scratch reader
 for the subset of YAML that workflow files use (block and flow mappings/sequences,
-quoted and plain scalars, `|`/`>` block scalars, comments) with one deliberate
-difference from PyYAML's default behavior: it resolves booleans the way YAML 1.2's core
+quoted and plain scalars, `|`/`>` block scalars, comments, `&anchor`/`*alias`) with
+one deliberate difference from PyYAML's default behavior: it resolves booleans the way YAML 1.2's core
 schema does (only `true`/`false`), not YAML 1.1's (which also turns `on`, `off`, `yes`,
 and `no` into booleans). That difference is the entire reason this project doesn't take
 a YAML dependency: the field this tool cares about most, `on:`, is exactly the field
-PyYAML's default loader gets wrong. `wouldrun/globmatch.py` matches GitHub's
+PyYAML's default loader gets wrong. An alias reuses the anchored value instead of
+copying it, so a file built to expand exponentially loads as fast as it reads. Merge
+keys (`<<: *name`) are a parse error, because GitHub rejects them too.
+`wouldrun/globmatch.py` matches GitHub's
 filter-pattern glob syntax with a linear reach-set sweep over a compiled token list,
 not a translated regex: a regex where every `*` becomes `[^/]*` is ambiguous enough
 that a pattern a workflow file is allowed to contain sends Python's engine into

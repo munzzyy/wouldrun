@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import reprlib
 from dataclasses import dataclass, field
 from typing import Optional
 
 from . import yamlmini
+
+# Aliases share objects, so a value printed in full can be exponentially large.
+_short = reprlib.Repr()
+_short.maxlevel = 2
+_short.maxlist = 4
+_short.maxdict = 4
 
 
 class WorkflowParseError(ValueError):
@@ -106,7 +113,7 @@ def _normalize_on(raw):
             if isinstance(item, str):
                 out[item] = None
             else:
-                raise WorkflowParseError(f"on: list contains a non-string entry: {item!r}")
+                raise WorkflowParseError(f"on: list contains a non-string entry: {_short.repr(item)}")
         return out
     if isinstance(raw, dict):
         return dict(raw)
@@ -126,7 +133,7 @@ def _parse_job(job_id, spec):
     return Job(
         job_id=job_id,
         runs_on=spec.get("runs-on"),
-        needs=[str(x) for x in needs],
+        needs=[str(x) for x in needs if not isinstance(x, (list, dict))],
         uses=uses if isinstance(uses, str) else None,
         condition=condition if isinstance(condition, str) else None,
     )

@@ -1,5 +1,6 @@
 """The core correctness matrix: (event, ref, changed files) x workflows."""
 
+import time
 import unittest
 
 from wouldrun.discover import discover
@@ -844,6 +845,87 @@ class MalformedGlobDoesNotCrashEvaluation(unittest.TestCase):
         by_path = {r.workflow.path: r for r in results}
         self.assertFalse(by_path[".github/workflows/broken.yml"].fires)
         self.assertTrue(by_path[".github/workflows/ok.yml"].fires)
+
+
+class AnchorsAndAliases(unittest.TestCase):
+    def test_aliased_paths_list_fires_for_both_events(self):
+        text = (
+            "on:\n  push:\n    paths: &src ['src/**']\n  pull_request:\n    paths: *src\n"
+            "jobs:\n  b:\n    runs-on: u\n"
+        )
+        push = Event(name="push", ref="refs/heads/main", changed_files=["src/app.py"])
+        pr = Event(name="pull_request", base_ref="main", changed_files=["src/app.py"])
+        self.assertTrue(_run(text, push).fires)
+        self.assertTrue(_run(text, pr).fires)
+        docs_only = Event(name="pull_request", base_ref="main", changed_files=["docs/x.md"])
+        self.assertFalse(_run(text, docs_only).fires)
+
+    def test_anchored_block_sequence_keeps_later_trigger_and_jobs(self):
+        text = (
+            "on:\n  push:\n    paths: &src\n      - 'src/**'\n"
+            "  pull_request:\n    paths: *src\n"
+            "jobs:\n  build:\n    runs-on: u\n  test:\n    runs-on: u\n"
+        )
+        wf = parse_workflow(".github/workflows/x.yml", text)
+        self.assertIsNone(wf.parse_error)
+        self.assertEqual(set(wf.triggers), {"push", "pull_request"})
+        self.assertEqual(set(wf.jobs), {"build", "test"})
+        r = _run(text, Event(name="pull_request", base_ref="main", changed_files=["src/app.py"]))
+        self.assertTrue(r.fires)
+        self.assertEqual(r.jobs, ["build", "test"])
+
+    def test_aliased_trigger_mapping_carries_its_filters(self):
+        text = (
+            "on:\n  push: &trig {branches: [main], paths: ['src/**']}\n  pull_request: *trig\n"
+            "jobs:\n  b:\n    runs-on: u\n"
+        )
+        wf = parse_workflow(".github/workflows/x.yml", text)
+        self.assertEqual(wf.triggers["pull_request"], {"branches": ["main"], "paths": ["src/**"]})
+        self.assertFalse(_run(text, Event(name="pull_request", base_ref="dev", changed_files=["src/a.py"])).fires)
+        self.assertTrue(_run(text, Event(name="pull_request", base_ref="main", changed_files=["src/a.py"])).fires)
+
+    def test_aliased_step_keeps_every_job(self):
+        text = (
+            "on: push\njobs:\n"
+            "  build:\n    runs-on: u\n    steps:\n      - &use_cache\n"
+            "        uses: actions/cache@v4\n        id: cache\n      - run: make\n"
+            "  test:\n    runs-on: u\n    steps:\n      - *use_cache\n"
+            "  deploy:\n    uses: ./.github/workflows/deploy.yml\n"
+        )
+        wf = parse_workflow(".github/workflows/x.yml", text)
+        self.assertIsNone(wf.parse_error)
+        self.assertEqual(list(wf.jobs), ["build", "test", "deploy"])
+        self.assertEqual(wf.jobs["deploy"].uses, "./.github/workflows/deploy.yml")
+
+    def test_undefined_alias_is_a_parse_error(self):
+        wf = parse_workflow(".github/workflows/x.yml", "on:\n  push:\n    paths: *nosuch\njobs: {}\n")
+        self.assertIsNotNone(wf.parse_error)
+        self.assertIn("nosuch", wf.parse_error)
+
+    def test_merge_key_is_a_parse_error(self):
+        text = (
+            "on:\n  push: &trig\n    branches: [main]\n  pull_request:\n    <<: *trig\n"
+            "jobs:\n  b:\n    runs-on: u\n"
+        )
+        wf = parse_workflow(".github/workflows/x.yml", text)
+        self.assertIsNotNone(wf.parse_error)
+        self.assertIn("merge key", wf.parse_error)
+
+    def test_amplified_alias_in_on_and_jobs_stays_fast(self):
+        lines = ['l0: &l0 ["lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol", "lol"]']
+        for k in range(1, 10):
+            lines.append(f"l{k}: &l{k} [" + ", ".join([f"*l{k - 1}"] * 10) + "]")
+        start = time.monotonic()
+        listed = parse_workflow(".github/workflows/a.yml", "\n".join(lines + ["on: [push, *l9]"]) + "\n")
+        needs = parse_workflow(
+            ".github/workflows/b.yml",
+            "\n".join(lines + ["on: push", "jobs:\n  a:\n    runs-on: u\n    needs: *l9"]) + "\n",
+        )
+        self.assertLess(time.monotonic() - start, 1.0)
+        self.assertIn("non-string entry", listed.parse_error)
+        self.assertLess(len(listed.parse_error), 500)
+        self.assertIsNone(needs.parse_error)
+        self.assertEqual(needs.jobs["a"].needs, [])
 
 
 if __name__ == "__main__":

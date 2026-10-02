@@ -19,11 +19,13 @@ belt-and-suspenders guard against a stray boolean key.
 Supported: block and flow mappings, block and flow sequences, single- and
 double-quoted scalars, plain scalars, `|`/`>` block scalars (consumed and
 kept as opaque text, since wouldrun never needs step/run bodies), comments,
-and a single leading `---` / trailing `...` document marker. Not supported:
-anchors/aliases (a bare `&name`/`*name` token is kept as a literal string),
-multi-document streams, and tag annotations (`!!str` and friends are kept
-as part of the scalar text). None of those appear in the trigger and job
-metadata this tool reads.
+anchors and aliases (`&name` / `*name`), and a single leading `---` /
+trailing `...` document marker. An alias returns the same object its anchor
+built, never a copy, so a chain of aliases that would expand exponentially
+costs nothing to load. Merge keys (`<<: *name`) are rejected with a YamlError
+because GitHub rejects them too. Not supported: multi-document streams and
+tag annotations (`!!str` and friends are kept as part of the scalar text).
+Neither appears in the trigger and job metadata this tool reads.
 """
 
 from __future__ import annotations
@@ -37,6 +39,9 @@ MAX_DEPTH = 200  # nesting levels; real workflow files never get close
 _BLOCK_SCALAR_RE = re.compile(r"^[|>][+-]?\d*$")
 _INT_RE = re.compile(r"^[-+]?[0-9]+$")
 _FLOAT_RE = re.compile(r"^[-+]?(\d+\.\d*|\.\d+|\d+[eE][-+]?\d+|\d+\.\d*[eE][-+]?\d+)$")
+_ANCHOR_RE = re.compile(r"^&([^\s,\[\]{}]+)(?:\s+|$)")
+_ALIAS_RE = re.compile(r"^\*([^\s,\[\]{}]+)$")
+_MERGE_KEY_ERROR = "YAML merge keys (`<<`) are not supported in GitHub Actions workflows"
 
 
 class YamlError(ValueError):
@@ -62,6 +67,7 @@ class _Parser:
         self.lines = lines
         self.n = len(lines)
         self._depth = 0
+        self.anchors = {}
         self._trim_document_markers()
 
     def _trim_document_markers(self):
@@ -143,20 +149,48 @@ class _Parser:
             split = _split_key_value(content)
             if split is None:
                 raise YamlError(f"malformed mapping line: {self.lines[real]!r}")
-            key, rest = split
-            if rest == "":
-                value, next_i = self.parse_block(real + 1, indent + 1)
-                if value is None:
-                    seq = self._indentless_sequence(next_i, indent)
-                    if seq is not None:
-                        value, next_i = seq
-            elif _BLOCK_SCALAR_RE.match(rest):
-                value, next_i = self._consume_block_scalar(real, indent)
-            else:
-                value, next_i = self._flow_value(rest, real)
+            key = self._key(split[0], content)
+            value, next_i = self._value_after_key(split[1], real, indent)
             result[key] = value
             i = next_i
         return result, i
+
+    def _key(self, key, content):
+        """Resolve a block mapping key's anchor or alias; a quoted key is literal."""
+        if content[0] in ("'", '"'):
+            return key
+        if key == "<<":
+            raise YamlError(_MERGE_KEY_ERROR)
+        anchor, key = _split_anchor(key)
+        if _ALIAS_RE.match(key):
+            key = self._alias(key)
+            if not isinstance(key, str):
+                raise YamlError(f"alias used as a mapping key is not a string: {key!r}")
+        if anchor is not None:
+            self.anchors[anchor] = key
+        return key
+
+    def _value_after_key(self, rest, real, indent):
+        anchor, rest = _split_anchor(rest)
+        if rest == "":
+            value, next_i = self.parse_block(real + 1, indent + 1)
+            if value is None:
+                seq = self._indentless_sequence(next_i, indent)
+                if seq is not None:
+                    value, next_i = seq
+        elif _BLOCK_SCALAR_RE.match(rest):
+            value, next_i = self._consume_block_scalar(real, indent)
+        else:
+            value, next_i = self._flow_value(rest, real)
+        if anchor is not None:
+            self.anchors[anchor] = value
+        return value, next_i
+
+    def _alias(self, token):
+        name = token[1:]
+        if name not in self.anchors:
+            raise YamlError(f"alias *{name} refers to an anchor that is not defined above it")
+        return self.anchors[name]
 
     def _parse_sequence(self, idx, indent):
         result = []
@@ -175,38 +209,35 @@ class _Parser:
                 rest = content[2:]
             else:
                 break
-            if rest == "":
-                value, next_i = self.parse_block(real + 1, indent + 1)
-                result.append(value)
-                i = next_i
-                continue
             # "- key: value" starts an inline mapping; the item's effective
             # indent is wherever `rest` began on this physical line.
             item_indent = indent + (len(content) - len(rest))
+            # On `- &a key: v` the anchor names the key, as in PyYAML.
+            anchor, rest = _split_anchor(rest)
+            if rest == "":
+                value, next_i = self.parse_block(real + 1, indent + 1)
+                if anchor is not None:
+                    self.anchors[anchor] = value
+                result.append(value)
+                i = next_i
+                continue
             split = _split_key_value(rest)
             if split is not None:
-                key, kv_rest = split
-                mapping = {}
-                if kv_rest == "":
-                    value, next_i = self.parse_block(real + 1, item_indent + 1)
-                    if value is None:
-                        seq = self._indentless_sequence(next_i, item_indent)
-                        if seq is not None:
-                            value, next_i = seq
-                elif _BLOCK_SCALAR_RE.match(kv_rest):
-                    value, next_i = self._consume_block_scalar_at(real, item_indent, kv_rest)
-                else:
-                    value, next_i = self._flow_value(kv_rest, real)
-                mapping[key] = value
+                key = self._key(split[0], rest)
+                if anchor is not None:
+                    self.anchors[anchor] = key
+                value, next_i = self._value_after_key(split[1], real, item_indent)
+                mapping = {key: value}
                 more, next_i = self._parse_mapping_continuation(next_i, item_indent, mapping)
                 result.append(more)
                 i = next_i
-            elif _BLOCK_SCALAR_RE.match(rest):
-                value, next_i = self._consume_block_scalar_at(real, item_indent, rest)
-                result.append(value)
-                i = next_i
             else:
-                value, next_i = self._flow_value(rest, real)
+                if _BLOCK_SCALAR_RE.match(rest):
+                    value, next_i = self._consume_block_scalar_at(real, item_indent, rest)
+                else:
+                    value, next_i = self._flow_value(rest, real)
+                if anchor is not None:
+                    self.anchors[anchor] = value
                 result.append(value)
                 i = next_i
         return result, i
@@ -226,17 +257,8 @@ class _Parser:
             split = _split_key_value(content)
             if split is None:
                 break
-            key, rest = split
-            if rest == "":
-                value, next_i = self.parse_block(real + 1, indent + 1)
-                if value is None:
-                    seq = self._indentless_sequence(next_i, indent)
-                    if seq is not None:
-                        value, next_i = seq
-            elif _BLOCK_SCALAR_RE.match(rest):
-                value, next_i = self._consume_block_scalar(real, indent)
-            else:
-                value, next_i = self._flow_value(rest, real)
+            key = self._key(split[0], content)
+            value, next_i = self._value_after_key(split[1], real, indent)
             mapping[key] = value
             i = next_i
         return mapping, i
@@ -303,8 +325,12 @@ class _Parser:
         before parsing. Returns (value, next_line_index)."""
         if rest and rest[0] in "[{":
             text, end = self._gather_flow(rest, real)
-            return _parse_scalar_or_flow(text), end + 1
-        return _parse_scalar_or_flow(rest), real + 1
+            return _FlowParser(text, self.anchors).parse(), end + 1
+        if rest.startswith("*"):
+            if not _ALIAS_RE.match(rest):
+                raise YamlError(f"malformed alias: {rest!r}")
+            return self._alias(rest), real + 1
+        return _coerce_scalar(rest), real + 1
 
     def _gather_flow(self, rest, line_idx):
         """`rest` opens a flow collection. If its brackets don't close on this
@@ -461,30 +487,26 @@ def _coerce_scalar(token):
         return int(token)
     if _FLOAT_RE.match(token):
         return float(token)
-    if token.startswith("&") or token.startswith("*"):
-        # Anchors/aliases are not resolved; keep the token as literal text
-        # (wouldrun never needs this level of the file).
-        return token
     return token
 
 
-def _parse_scalar_or_flow(rest):
-    rest = rest.strip()
-    if rest == "":
-        return None
-    if rest[0] == "[" or rest[0] == "{":
-        return _FlowParser(rest).parse()
-    return _coerce_scalar(rest)
+def _split_anchor(text):
+    """Peel a leading `&name` off `text`: (name, the rest) or (None, text)."""
+    m = _ANCHOR_RE.match(text)
+    if m is None:
+        return None, text
+    return m.group(1), text[m.end() :]
 
 
 class _FlowParser:
     """Recursive-descent parser for inline `[...]` / `{...}` flow collections."""
 
-    def __init__(self, s):
+    def __init__(self, s, anchors):
         self.s = s
         self.i = 0
         self.n = len(s)
         self._depth = 0
+        self.anchors = anchors
 
     def parse(self):
         self._ws()
@@ -512,7 +534,26 @@ class _FlowParser:
                 self._depth -= 1
         if c in ("'", '"'):
             return self._quoted()
+        if c == "&":
+            name = self._name()
+            value = self._value()
+            self.anchors[name] = value
+            return value
+        if c == "*":
+            name = self._name()
+            if name not in self.anchors:
+                raise YamlError(f"alias *{name} refers to an anchor that is not defined above it")
+            return self.anchors[name]
         return self._plain()
+
+    def _name(self):
+        self.i += 1
+        start = self.i
+        while self.i < self.n and self.s[self.i] not in " \t,[]{}":
+            self.i += 1
+        if self.i == start:
+            raise YamlError(f"anchor or alias with no name: {self.s!r}")
+        return self.s[start : self.i]
 
     def _list(self):
         self.i += 1
@@ -547,7 +588,10 @@ class _FlowParser:
             return out
         while True:
             self._ws()
+            quoted = self.i < self.n and self.s[self.i] in ("'", '"')
             key = self._value()
+            if key == "<<" and not quoted:
+                raise YamlError(_MERGE_KEY_ERROR)
             self._ws()
             if self.i < self.n and self.s[self.i] == ":":
                 self.i += 1
